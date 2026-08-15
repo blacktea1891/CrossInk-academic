@@ -7,15 +7,12 @@
 #include <cstring>
 #include <string>
 
+#include "util/AtomicFile.h"
+
 AnnotationTagStore AnnotationTagStore::instance;
 
 const AnnotationTag* AnnotationTagStore::at(const uint8_t index) const {
   return index < tagCount ? &tags[index] : nullptr;
-}
-
-uint16_t AnnotationTagStore::idAt(const uint8_t index) const {
-  const AnnotationTag* tag = at(index);
-  return tag ? tag->id : 0;
 }
 
 const char* AnnotationTagStore::nameForId(const uint16_t id) const {
@@ -35,23 +32,49 @@ bool AnnotationTagStore::validName(const char* name) const {
 }
 
 bool AnnotationTagStore::load() {
-  if (loaded) return true;
-  loaded = true;
+  if (loadState == LoadState::Ready) return true;
+
+  loadState = LoadState::Unloaded;
   tagCount = 0;
   nextId = 1;
 
-  const std::string backupPath = std::string(FILE_PATH) + ".bak";
-  if (!Storage.exists(FILE_PATH) && Storage.exists(backupPath.c_str())) {
-    if (!Storage.rename(backupPath.c_str(), FILE_PATH)) {
-      LOG_ERR("TAGS", "Failed to recover tag store backup");
+  const std::string backupPath = AtomicFile::backupPath(FILE_PATH);
+  const bool hasCurrent = Storage.exists(FILE_PATH);
+  const bool hasBackup = Storage.exists(backupPath.c_str());
+  if (!hasCurrent && !hasBackup) {
+    loadState = LoadState::Ready;
+    return true;
+  }
+
+  if (hasCurrent && readFromPath(FILE_PATH)) {
+    loadState = LoadState::Ready;
+    return true;
+  }
+
+  if (hasBackup && readFromPath(backupPath.c_str())) {
+    if (hasCurrent && !Storage.remove(FILE_PATH)) {
+      LOG_ERR("TAGS", "Recovered backup but could not remove corrupt tag store");
+      loadState = LoadState::Failed;
       return false;
     }
+    LOG_INF("TAGS", "Loaded annotation tags from backup");
+    loadState = LoadState::Ready;
+    return true;
   }
-  if (!Storage.exists(FILE_PATH)) return true;
+
+  tagCount = 0;
+  nextId = 1;
+  loadState = LoadState::Failed;
+  return false;
+}
+
+bool AnnotationTagStore::readFromPath(const char* path) {
+  tagCount = 0;
+  nextId = 1;
 
   FsFile file;
-  if (!Storage.openFileForRead("TAGS", FILE_PATH, file)) {
-    LOG_ERR("TAGS", "Failed to open tag store");
+  if (!Storage.openFileForRead("TAGS", path, file)) {
+    LOG_ERR("TAGS", "Failed to open tag store: %s", path);
     return false;
   }
 
@@ -61,7 +84,7 @@ bool AnnotationTagStore::load() {
       !serialization::tryReadPod(file, storedCount) || storedCount > ANNOTATION_TAG_MAX ||
       !serialization::tryReadPod(file, nextId)) {
     file.close();
-    LOG_ERR("TAGS", "Invalid tag store header");
+    LOG_ERR("TAGS", "Invalid tag store header: %s", path);
     tagCount = 0;
     nextId = 1;
     return false;
@@ -74,7 +97,7 @@ bool AnnotationTagStore::load() {
       file.close();
       tagCount = 0;
       nextId = 1;
-      LOG_ERR("TAGS", "Truncated tag store at record %u", i);
+      LOG_ERR("TAGS", "Truncated tag store at record %u: %s", i, path);
       return false;
     }
     tag.name[sizeof(tag.name) - 1] = '\0';
@@ -88,12 +111,15 @@ bool AnnotationTagStore::load() {
 }
 
 bool AnnotationTagStore::save() const {
+  if (loadState != LoadState::Ready) {
+    LOG_ERR("TAGS", "Refusing to save annotation tags before a successful load");
+    return false;
+  }
   Storage.mkdir("/.crosspoint");
 
-  const std::string tmpPath = std::string(FILE_PATH) + ".tmp";
-  const std::string backupPath = std::string(FILE_PATH) + ".bak";
-  if (Storage.exists(tmpPath.c_str())) Storage.remove(tmpPath.c_str());
-  if (Storage.exists(backupPath.c_str()) && Storage.exists(FILE_PATH)) Storage.remove(backupPath.c_str());
+  const std::string targetPath = FILE_PATH;
+  const std::string tmpPath = AtomicFile::temporaryPath(targetPath);
+  if (!AtomicFile::prepare(targetPath, "TAGS")) return false;
 
   FsFile file;
   if (!Storage.openFileForWrite("TAGS", tmpPath, file)) {
@@ -116,25 +142,14 @@ bool AnnotationTagStore::save() const {
     return false;
   }
 
-  const bool hadCurrent = Storage.exists(FILE_PATH);
-  if (hadCurrent && !Storage.rename(FILE_PATH, backupPath.c_str())) {
-    Storage.remove(tmpPath.c_str());
-    LOG_ERR("TAGS", "Failed to back up tag store");
-    return false;
-  }
-  if (!Storage.rename(tmpPath.c_str(), FILE_PATH)) {
-    if (hadCurrent) Storage.rename(backupPath.c_str(), FILE_PATH);
-    LOG_ERR("TAGS", "Failed to replace tag store");
-    return false;
-  }
-  if (hadCurrent && Storage.exists(backupPath.c_str())) Storage.remove(backupPath.c_str());
-  return true;
+  return AtomicFile::commit(targetPath, "TAGS");
 }
 
 bool AnnotationTagStore::add(const char* name) {
-  if (!loaded) load();
+  if (!load()) return false;
   if (tagCount >= ANNOTATION_TAG_MAX || !validName(name)) return false;
 
+  const uint16_t previousNextId = nextId;
   AnnotationTag& tag = tags[tagCount++];
   tag.id = nextId++;
   if (tag.id == 0) tag.id = nextId++;
@@ -143,11 +158,12 @@ bool AnnotationTagStore::add(const char* name) {
   if (save()) return true;
 
   --tagCount;
+  nextId = previousNextId;
   return false;
 }
 
 bool AnnotationTagStore::rename(const uint8_t index, const char* name) {
-  if (!loaded) load();
+  if (!load()) return false;
   if (index >= tagCount || !name || name[0] == '\0' || strlen(name) >= ANNOTATION_TAG_NAME_MAX) return false;
   for (uint8_t i = 0; i < tagCount; ++i) {
     if (i != index && strcmp(tags[i].name, name) == 0) return false;
@@ -165,7 +181,7 @@ bool AnnotationTagStore::rename(const uint8_t index, const char* name) {
 }
 
 bool AnnotationTagStore::remove(const uint8_t index) {
-  if (!loaded) load();
+  if (!load()) return false;
   if (index >= tagCount) return false;
 
   const AnnotationTag removed = tags[index];

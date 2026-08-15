@@ -16,6 +16,12 @@ struct AnnotationTag {
 
 class AnnotationTagStore {
  public:
+  enum class LoadState : uint8_t {
+    Unloaded,
+    Ready,
+    Failed,
+  };
+
   static AnnotationTagStore& getInstance() { return instance; }
 
   bool load();
@@ -24,7 +30,8 @@ class AnnotationTagStore {
   uint8_t count() const { return tagCount; }
   const AnnotationTag* at(uint8_t index) const;
   const char* nameForId(uint16_t id) const;
-  uint16_t idAt(uint8_t index) const;
+  LoadState state() const { return loadState; }
+  bool isReady() const { return loadState == LoadState::Ready; }
 
   bool add(const char* name);
   bool rename(uint8_t index, const char* name);
@@ -36,11 +43,12 @@ class AnnotationTagStore {
   AnnotationTag tags[ANNOTATION_TAG_MAX]{};
   uint8_t tagCount = 0;
   uint16_t nextId = 1;
-  bool loaded = false;
+  LoadState loadState = LoadState::Unloaded;
 
   static constexpr const char* FILE_PATH = "/.crosspoint/annotation-tags.bin";
   static constexpr uint8_t FILE_VERSION = 1;
 
+  bool readFromPath(const char* path);
   bool validName(const char* name) const;
 };
 

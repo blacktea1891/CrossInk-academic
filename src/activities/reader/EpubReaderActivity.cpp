@@ -40,6 +40,7 @@
 #include "EpubReaderUtils.h"
 #include "GlobalActions.h"
 #include "KOReaderCredentialStore.h"
+#include "KOReaderDocumentId.h"
 #include "KOReaderSyncActivity.h"
 #include "LookedUpWordsActivity.h"
 #include "MappedInputManager.h"
@@ -2113,9 +2114,13 @@ void EpubReaderActivity::onEnter() {
   mappedInput.setReaderMode(true);
 
   BOOKMARKS.loadForBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), "epub");
-  CLIPPINGS.loadForBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), "epub");
-  ANNOTATION_TAGS.load();
-  pageTagStore.loadForBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), "epub");
+  const std::string documentId = KOReaderDocumentId::calculate(epub->getPath());
+  CLIPPINGS.loadForBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), "epub", documentId);
+  pageTagStore.loadForBook(epub->getPath(), documentId, "epub");
+  if (ANNOTATION_TAGS.load()) {
+    CLIPPINGS.clearUnknownTagIds();
+    pageTagStore.clearUnknownTagIds();
+  }
 
   uint16_t restartPageBuildSpine = UINT16_MAX;
   uint16_t restartPageBuildTarget = 0;
@@ -3800,38 +3805,70 @@ void EpubReaderActivity::openAutoPageTurnIntervalPicker(const bool ignoreInitial
 }
 
 void EpubReaderActivity::startClipSelection() {
-  ANNOTATION_TAGS.load();
+  if (!ANNOTATION_TAGS.load()) {
+    LOG_ERR("CLIP", "Annotation tags unavailable; starting an untagged clipping");
+    startClipSelectionForTag(0);
+    return;
+  }
   if (ANNOTATION_TAGS.count() == 0) {
     startClipSelectionForTag(0);
     return;
   }
 
-  pauseReadingPaceTimer("clip_tag_selection");
-  AnnotationTagPickerData pickerData = buildAnnotationTagPickerData(0);
+  openTagPicker(TagPickerAction::Clip, 0);
+}
+
+void EpubReaderActivity::openTagPicker(const TagPickerAction action, const uint16_t currentTagId,
+                                       const uint16_t spineIndex, const float pageProgress,
+                                       const uint16_t pageCount) {
+  pauseReadingPaceTimer("annotation_tag_picker");
+  AnnotationTagPickerData pickerData = buildAnnotationTagPickerData(currentTagId);
   const std::vector<uint16_t> tagIds = pickerData.ids;
+  const char* activityName = action == TagPickerAction::Clip ? "AnnotationTagSelection" : "PageTagSelection";
   auto picker = makeUniqueNoThrow<OptionSelectionActivity>(
-      renderer, mappedInput, "AnnotationTagSelection", StrId::STR_SELECT_TAG, std::move(pickerData.options),
+      renderer, mappedInput, activityName, StrId::STR_SELECT_TAG, std::move(pickerData.options),
       pickerData.selectedIndex, true, true);
   if (!picker) {
-    LOG_ERR("CLIP", "OOM allocating tag selection activity");
-    resumeReadingPaceTimer("clip_tag_selection_alloc_failed");
+    LOG_ERR("TAGS", "OOM allocating tag selection activity");
+    resumeReadingPaceTimer("annotation_tag_picker_alloc_failed");
     requestUpdate();
     return;
   }
-  startActivityForResult(std::move(picker), [this, tagIds](const ActivityResult& result) {
-    if (result.isCancelled) {
-      resumeReadingPaceTimer("clip_tag_selection_cancel");
-      requestUpdate();
-      return;
-    }
-    const auto* selection = std::get_if<OptionSelectionResult>(&result.data);
-    if (!selection || selection->index >= tagIds.size()) {
-      resumeReadingPaceTimer("clip_tag_selection_invalid");
-      requestUpdate();
-      return;
-    }
-    startClipSelectionForTag(tagIds[selection->index]);
-  });
+  startActivityForResult(
+      std::move(picker), [this, action, tagIds, spineIndex, pageProgress, pageCount](const ActivityResult& result) {
+        resumeReadingPaceTimer("annotation_tag_picker_return");
+        if (result.isCancelled) {
+          requestUpdate();
+          return;
+        }
+        const auto* selection = std::get_if<OptionSelectionResult>(&result.data);
+        if (!selection || selection->index >= tagIds.size()) {
+          requestUpdate();
+          return;
+        }
+
+        const uint16_t tagId = tagIds[selection->index];
+        switch (action) {
+          case TagPickerAction::Clip:
+            startClipSelectionForTag(tagId);
+            return;
+          case TagPickerAction::Page:
+            break;
+        }
+
+        bool saved = false;
+        {
+          RenderLock lock(*this);
+          saved = pageTagStore.setTagForPage(spineIndex, pageProgress, pageCount, tagId);
+          if (saved) drawToast(renderer, tagId == 0 ? tr(STR_PAGE_TAG_REMOVED) : tr(STR_PAGE_TAG_SAVED));
+        }
+        if (!saved) {
+          RenderLock lock(*this);
+          drawToast(renderer, tr(STR_PAGE_TAG_FAILED));
+        }
+        delay(700);
+        requestUpdate();
+      });
 }
 
 void EpubReaderActivity::startClipSelectionForTag(const uint16_t tagId) {
@@ -4129,7 +4166,12 @@ void EpubReaderActivity::openPageTagPicker() {
     return;
   }
 
-  ANNOTATION_TAGS.load();
+  if (!ANNOTATION_TAGS.load()) {
+    RenderLock lock(*this);
+    drawToast(renderer, tr(STR_PAGE_TAG_FAILED));
+    requestUpdate();
+    return;
+  }
   if (ANNOTATION_TAGS.count() == 0) {
     {
       RenderLock lock(*this);
@@ -4141,61 +4183,21 @@ void EpubReaderActivity::openPageTagPicker() {
   }
 
   uint16_t spineIndex = 0;
-  uint16_t page = 0;
+  float pageProgress = 0.0f;
   uint16_t pageCount = 1;
   uint16_t currentTag = 0;
   {
     RenderLock lock(*this);
     if (!section) return;
     spineIndex = static_cast<uint16_t>(currentSpineIndex);
-    page = static_cast<uint16_t>(std::max(0, section->currentPage));
     const int estimatedPages = std::max(1, static_cast<int>(section->estimatedTotalPages()));
     pageCount = static_cast<uint16_t>(std::min<int>(UINT16_MAX, estimatedPages));
     pageCount = std::max<uint16_t>(1, pageCount);
-    currentTag = pageTagStore.tagForPage(spineIndex, page, pageCount);
+    pageProgress = static_cast<float>(std::max(0, section->currentPage)) / static_cast<float>(pageCount);
+    currentTag = pageTagStore.tagForPage(spineIndex, pageProgress, pageCount);
   }
 
-  pauseReadingPaceTimer("page_tag_selection");
-  AnnotationTagPickerData pickerData = buildAnnotationTagPickerData(currentTag);
-  const std::vector<uint16_t> tagIds = pickerData.ids;
-  auto picker = makeUniqueNoThrow<OptionSelectionActivity>(
-      renderer, mappedInput, "PageTagSelection", StrId::STR_SELECT_TAG, std::move(pickerData.options),
-      pickerData.selectedIndex, true, true);
-  if (!picker) {
-    LOG_ERR("TAGS", "OOM allocating page tag selection activity");
-    resumeReadingPaceTimer("page_tag_selection_alloc_failed");
-    requestUpdate();
-    return;
-  }
-
-  startActivityForResult(std::move(picker), [this, tagIds, spineIndex, page, pageCount](const ActivityResult& result) {
-    if (result.isCancelled) {
-      resumeReadingPaceTimer("page_tag_selection_cancel");
-      requestUpdate();
-      return;
-    }
-    const auto* selection = std::get_if<OptionSelectionResult>(&result.data);
-    if (!selection || selection->index >= tagIds.size()) {
-      resumeReadingPaceTimer("page_tag_selection_invalid");
-      requestUpdate();
-      return;
-    }
-
-    const uint16_t tagId = tagIds[selection->index];
-    bool saved = false;
-    {
-      RenderLock lock(*this);
-      saved = pageTagStore.setTagForPage(spineIndex, page, pageCount, tagId);
-      if (saved) drawToast(renderer, tagId == 0 ? tr(STR_PAGE_TAG_REMOVED) : tr(STR_PAGE_TAG_SAVED));
-    }
-    if (!saved) {
-      RenderLock lock(*this);
-      drawToast(renderer, tr(STR_PAGE_TAG_FAILED));
-    }
-    resumeReadingPaceTimer("page_tag_selection_return");
-    delay(700);
-    requestUpdate();
-  });
+  openTagPicker(TagPickerAction::Page, currentTag, spineIndex, pageProgress, pageCount);
 }
 
 void EpubReaderActivity::resetReadingPaceData() {
@@ -5550,7 +5552,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         const Clipping* clipping = CLIPPINGS.clippingAt(pendingClippingIndex);
         const uint16_t fallbackPage = static_cast<uint16_t>(std::max(0, section->currentPage));
         std::string clippingText;
-        clippingText.reserve(CLIPPING_TEXT_MAX);
+        clippingText.reserve(CLIPPING_TEXT_INITIAL_RESERVE);
         if (clipping) CLIPPINGS.readClippingText(*clipping, clippingText);
         section->currentPage =
             clipping ? resolveClippingJumpPage(*section, *clipping, clippingText, fallbackPage) : fallbackPage;
@@ -5597,7 +5599,7 @@ void EpubReaderActivity::render(RenderLock&& lock) {
         const Clipping* clipping = CLIPPINGS.clippingAt(pendingClippingIndex);
         const uint16_t fallbackPage = static_cast<uint16_t>(std::max(0, section->currentPage));
         std::string clippingText;
-        clippingText.reserve(CLIPPING_TEXT_MAX);
+        clippingText.reserve(CLIPPING_TEXT_INITIAL_RESERVE);
         if (clipping) CLIPPINGS.readClippingText(*clipping, clippingText);
         section->currentPage =
             clipping ? resolveClippingJumpPage(*section, *clipping, clippingText, fallbackPage) : fallbackPage;
@@ -6572,7 +6574,7 @@ void EpubReaderActivity::drawClippingHighlights(const Page& page, const int font
   const uint16_t currentPage = canUseStoredRanges ? static_cast<uint16_t>(section->currentPage) : 0;
   const uint16_t currentPageCount = canUseStoredRanges ? static_cast<uint16_t>(section->pageCount) : 0;
   std::string clippingText;
-  clippingText.reserve(CLIPPING_TEXT_MAX);
+  clippingText.reserve(CLIPPING_TEXT_INITIAL_RESERVE);
   for (const Clipping& clipping : CLIPPINGS.getClippings()) {
     if (clipping.spineIndex != static_cast<uint16_t>(currentSpineIndex)) {
       continue;
@@ -6729,9 +6731,8 @@ void EpubReaderActivity::renderStatusBar() const {
   const uint16_t pageTagPageCount =
       static_cast<uint16_t>(std::min<int>(UINT16_MAX, std::max(1, estimatedPageCount)));
   const bool pageTagged = !activeFootnotePreview &&
-                          pageTagStore.hasTagForPage(static_cast<uint16_t>(currentSpineIndex),
-                                                     static_cast<uint16_t>(std::max(0, section->currentPage)),
-                                                     pageTagPageCount);
+                          pageTagStore.hasTagForPage(static_cast<uint16_t>(currentSpineIndex), rawProgress,
+                                                    pageTagPageCount);
   char timeLeftLabel[24] = {};
   const char* timeLeft =
       (!activeFootnotePreview && formatTimeLeftLabel(timeLeftLabel, sizeof(timeLeftLabel))) ? timeLeftLabel : nullptr;

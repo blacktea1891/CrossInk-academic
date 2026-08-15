@@ -7,6 +7,7 @@
 #include "BookmarkStore.h"
 #include "ClippingStore.h"
 #include "CrossPointState.h"
+#include "KOReaderDocumentId.h"
 #include "PageTagStore.h"
 #include "RecentBooksStore.h"
 
@@ -40,6 +41,7 @@ std::string buildReadFolderDestination(const std::string& srcPath) {
 bool migrateMovedEpubState(const std::string& oldPath, const std::string& newPath, const std::string& oldCachePath,
                            const std::string& title, const std::string& author, const bool keepInRecents) {
   bool ok = true;
+  const std::string documentId = KOReaderDocumentId::calculate(newPath);
 
   const std::string newCachePath = Epub::cachePathForFilePath(newPath, "/.crosspoint");
   if (!oldCachePath.empty() && Storage.exists(oldCachePath.c_str())) {
@@ -55,12 +57,12 @@ bool migrateMovedEpubState(const std::string& oldPath, const std::string& newPat
     ok = false;
   }
 
-  if (!ClippingStore::migrateForFilePath(oldPath, newPath, title, author, "epub")) {
+  if (!ClippingStore::migrateForFilePath(oldPath, newPath, title, author, "epub", documentId)) {
     LOG_ERR("BookMove", "Failed to migrate clippings for moved book %s -> %s", oldPath.c_str(), newPath.c_str());
     ok = false;
   }
 
-  if (!PageTagStore::migrateForFilePath(oldPath, newPath, title, author, "epub")) {
+  if (!PageTagStore::migrateForFilePath(oldPath, newPath, documentId, "epub")) {
     LOG_ERR("BookMove", "Failed to migrate page tags for moved book %s -> %s", oldPath.c_str(), newPath.c_str());
     ok = false;
   }

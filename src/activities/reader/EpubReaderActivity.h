@@ -366,8 +366,14 @@ class EpubReaderActivity final : public Activity {
   void resetCurrentBookStatsAfterDelete();
   void openFileTransfer();
   void openAutoPageTurnIntervalPicker(bool ignoreInitialConfirmRelease = false);
+  enum class TagPickerAction : uint8_t {
+    Clip,
+    Page,
+  };
   void startClipSelection();
   void startClipSelectionForTag(uint16_t tagId);
+  void openTagPicker(TagPickerAction action, uint16_t currentTagId, uint16_t spineIndex = 0,
+                     float pageProgress = 0.0f, uint16_t pageCount = 1);
   void openPageTagPicker();
   void resetReadingPaceData();
   void captureGlobalReaderSettings();

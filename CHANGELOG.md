@@ -4,16 +4,25 @@
 
 - User-defined annotation tags can be managed from Reader settings and assigned to EPUB clippings or the current page.
 - Tagged pages show a compact indicator in the reader status bar, and clipping exports include the assigned tag.
+- Persistent last-known-good backups protect annotation tags, page tags, and clippings from interrupted SD-card writes.
+- A content-identified sidecar preserves clipping tags and full academic clipping text while keeping the primary clipping file readable by older firmware.
 
 ### Changed
 
 - Saved clipping text now supports up to 4096 bytes and is exported without the previous 2000-byte truncation.
-- Clipping files now include a content-derived document identity so stale annotations are not applied to a different EPUB at the same path.
+- Page tags now use fractional chapter progress, so they survive font, margin, spacing, and orientation changes.
+- The Academic binary omits Polish, Russian, Swedish, and Ukrainian translation and hyphenation data while retaining their source files.
+- Removed unused generated Bitter and Lexend Deca 18/20-point headers; emoji support and compiled 10/12/14/16-point fonts are unchanged.
 
 ### Fixed
 
 - Forward line-end selection now uses the actual reading-order size instead of an unrelated container size.
 - Oversized clipping selections now report an explicit error instead of being silently truncated.
+- Failed annotation-store reads can no longer be followed by an empty overwrite that silently deletes all tags.
+- Deleting a tag lazily clears orphaned clipping and page-tag references when the book is next opened.
+- Annotation pickers always resume the reading-pace timer on every return path.
+- Clipping text buffers start at 512 bytes and grow only when needed instead of reserving 4096 bytes eagerly.
+- Book moves refuse to overwrite unrelated annotation destinations and clean up temporary and backup generations safely.
 
 ## [v1.5.1] - 2026-08-12
 

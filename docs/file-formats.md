@@ -189,83 +189,52 @@ struct ReaderSettingsBin {
 
 ## `/.crosspoint/clippings/<bookType>_<crc32(path)>.bin`
 
-### Versions 1-4
+### Versions 1-4; current writer version 3
 
-Clipping files store the per-book EPUB clipping list used by the reader. A
-saved clipping is also what CrossInk renders as an in-reader highlight; there is
-no separate highlight file. The file lives in `/.crosspoint/clippings/` instead
-of the EPUB render-cache directory so clearing/rebuilding layout cache does not
-delete user clippings.
+The primary file stores the EPUB clipping list and remains readable by older
+firmware. The current writer uses version 3 and stores at most a 512-byte text
+preview per clipping. Academic metadata and complete text live in the sidecar
+described below.
 
-The current implementation only writes EPUB clipping files, so `bookType` is
-`epub`. The numeric suffix is `uzlib_crc32()` of the book's SD-card path, for
-example:
+The filename suffix is `uzlib_crc32()` of the SD-card path. The stored path is
+also validated, so a CRC collision cannot silently overwrite another book's
+annotations. The format contains the book title, author, path, clipping count,
+layout anchors, layout signature, fixed 48-byte chapter title, and the
+length-prefixed UTF-8 preview.
 
-```text
-/.crosspoint/clippings/epub_1234567890.bin
-```
+Versions 1-2 are still accepted. Academic RC2 version 4 added the document ID,
+tag ID, and up to 4096 bytes of text directly to this file. On first successful
+load, current firmware migrates version 4 to version 3 plus the sidecar. Older
+firmware can then see every clipping and its preview; returning to Academic
+restores the full text and tag.
 
-Binary layout:
+CrossInk uses the stored spine/page/paragraph fields as anchors and the saved
+text to relocate highlights after reflow. Creating a clipping also appends the
+complete selection and optional tag to `/My Clippings.txt`; that export is
+append-only.
 
-- `[0]` version (`1`, `2`, `3`, or current version `4`)
-- `[1-2]` clipping count (`uint16_t` LE, maximum `256`)
-- book title (`String`)
-- book author (`String`)
-- book path (`String`)
-- version 4 only: KOReader-compatible partial-content MD5 document ID
-  (`String`)
-- repeated clipping records:
-  - `spineIndex` (`uint16_t` LE)
-  - `startPage` (`uint16_t` LE)
-  - `endPage` (`uint16_t` LE)
-  - `pageCount` (`uint16_t` LE, at least `1`)
-  - `startWordIndex` (`uint16_t` LE)
-  - `endWordIndex` (`uint16_t` LE)
-  - `wordCount` (`uint16_t` LE)
-  - `paragraphIndex` (`uint16_t` LE, `UINT16_MAX` when unavailable)
-  - `timestamp` (`uint32_t` LE, seconds since firmware boot when saved)
-  - versions 3-4: reader layout signature (`uint32_t` LE; font, spacing,
-    viewport, and other section-layout inputs)
-  - version 4 only: annotation tag ID (`uint16_t` LE; `0` means no tag)
-  - `chapterTitle` (`char[48]`, null-terminated/truncated)
-  - version 1: selected text (`String`, truncated to `512` bytes for the
-    in-app store)
-  - versions 2-3: selected-text length (`uint16_t` LE) followed by that many
-    UTF-8 bytes (maximum `512`)
-  - version 4: selected-text length (`uint16_t` LE) followed by that many
-    UTF-8 bytes (maximum `4096`)
+## `/.crosspoint/clippings/<bookType>_<crc32(path)>.bin.tags`
 
-CrossInk uses the stored spine/page/paragraph fields as anchors, then searches
-near that location for the stored clipping text after relayout. This is similar
-to keeping both a DOM position and a text quote in a web app: the numeric
-position gives a fast starting point, while the text makes jumps and highlights
-survive font, layout, or page-count changes when possible.
+### Version 1
 
-Version 3 records which reader layout produced the numeric page/word anchor.
-When that signature differs, CrossInk ignores the stale numeric range and
-matches the saved text instead, including when both layouts happen to have the
-same total page count. Versions 1-2 retain their numeric fast path until the
-reader sees a relayout, when it stamps the previously active layout before
-rebuilding.
+The Academic sidecar stores one record per clipping:
 
-Version 4 records the EPUB content identity in addition to its path. If a
-different file replaces the EPUB at the same path, CrossInk rejects the stale
-clipping store instead of drawing annotations on unrelated text. Tag IDs are
-stable identifiers from the global annotation-tag store; deleting a tag
-definition does not remap existing clipping records.
+- stable clipping fingerprint (`uint64_t` LE), derived from intrinsic anchors,
+  chapter title, and the primary text preview
+- annotation tag ID (`uint16_t` LE; `0` means no tag)
+- complete-text length (`uint16_t` LE; maximum `4096`)
+- complete UTF-8 clipping text
 
-Creating a clipping also appends a Kindle-style export entry to
-`/My Clippings.txt` on the SD-card root. Version 4 exports the complete stored
-selection and adds `Tag: <name>` to the location line when a tag is assigned.
-The export is append-only. Removing a clipping from the reader deletes or
-rewrites only the binary clipping file; it does not remove previous entries
-from `/My Clippings.txt`.
+Its header contains version `1`, record count, book path, and the
+KOReader-compatible partial-content MD5 document ID. The fingerprint associates
+records by content instead of list index, so deleting, adding, or reordering
+another clipping does not move tags. A mismatched document ID rejects the
+sidecar; unmatched fingerprints are ignored while compatible primary previews
+remain available.
 
-When CrossInk moves an EPUB through its built-in move-to-Read flow, it rewrites
-the clipping file under the new path-derived name and removes the old one. If a
-book is renamed or moved outside CrossInk, the path hash changes, so the old
-clipping file may no longer be associated with the book until the file is moved
-back or the clipping store is migrated.
+Both files are staged and synchronized before replacement. If sidecar commit
+fails, the primary commit is rolled back. Successful writes retain `.bak`
+last-known-good generations.
 
 ## `/.crosspoint/annotation-tags.bin`
 
@@ -284,34 +253,33 @@ Binary layout:
   - tag ID (`uint16_t` LE; never `0`)
   - tag name (`char[32]`, null-terminated UTF-8)
 
-The file is replaced through a synchronized temporary file and backup so a
-failed SD-card write does not silently replace the previous definitions.
+The file is replaced through a synchronized temporary file and retains `.bak`
+as the last known-good generation. A failed read blocks writes until a valid
+current or backup generation can be loaded.
 
 ## `/.crosspoint/page-tags/<bookType>_<crc32(path)>.bin`
 
-### Version 1
+### Versions 1-2; current version 2
 
 Page tags are stored separately from EPUB layout caches and are guarded by the
-same content-derived document identity used by clipping version 4. The current
+same content-derived document identity used by the clipping sidecar. The current
 implementation supports EPUB and stores up to 256 tagged pages per book.
 
-Binary layout:
+Version 2 binary layout:
 
-- version (`uint8_t`, current value `1`)
+- version (`uint8_t`, current value `2`)
 - tagged-page count (`uint16_t` LE, maximum `256`)
-- book title (`String`)
-- book author (`String`)
 - book path (`String`)
 - KOReader-compatible partial-content MD5 document ID (`String`)
 - repeated page-tag records:
   - spine index (`uint16_t` LE)
-  - section page (`uint16_t` LE)
-  - section page count at assignment time (`uint16_t` LE)
+  - fractional progress within the spine (`float32` LE, `0.0`-`1.0`)
   - annotation tag ID (`uint16_t` LE)
 
-The stored page count prevents a tag marker from being shown at a stale page
-number after reflow. Like the global definition file, page-tag updates use a
-synchronized temporary file and backup.
+Version 1 also stored title, author, page number, and page count. It is accepted
+and automatically converted to the midpoint progress of the old page.
+Fractional progress lets the tag resolve after font, margin, line-spacing, or
+orientation changes. Updates retain a `.bak` last-known-good generation.
 
 ## `stats_v5.bin`
 

@@ -1,5 +1,29 @@
 # Academic Annotation Integration on CrossInk v1.5.1-rc-2
 
+## RC3 hardening work
+
+The next Academic release hardens the RC2 annotation patch without removing
+emoji support or changing the 4096-byte clipping limit:
+
+- Annotation, page-tag, and clipping stores keep persistent last-known-good
+  backups and block writes after an unrecoverable load failure.
+- Page tags use fractional spine progress and migrate the version 1 page/page
+  count representation automatically.
+- The clipping primary file remains version 3 compatible. A document-identified
+  sidecar stores full text and stable fingerprint-to-tag associations; RC2
+  version 4 files migrate on load.
+- Tag pickers share one timer-safe control path, and clipping strings reserve
+  512 bytes initially instead of 4096 bytes.
+- Polish, Russian, Swedish, and Ukrainian translation/hyphenation payloads are
+  omitted from the Academic binary while their source files remain available.
+  Existing selections of those languages fall back to English; passing
+  `--include-all-languages` to the i18n generator restores their translations
+  for a custom build (the Academic hyphenation build flag must also be removed).
+- Unused Bitter and Lexend Deca 18/20-point generated headers were removed.
+  Compiled reading-font sizes and emoji/symbol fallback remain unchanged.
+
+See `docs/file-formats.md` for the compatibility matrix and sidecar layout.
+
 ## Base
 
 - CrossInk tag: `v1.5.1-rc-2`

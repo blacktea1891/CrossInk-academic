@@ -27,6 +27,7 @@ Examples:
     python gen_i18n.py lib/I18n/translations lib/I18n/
     python gen_i18n.py --strip-unused
     python gen_i18n.py --strip-unused --src-dirs src lib/EpdFont
+    python gen_i18n.py --include-all-languages
 """
 
 import hashlib
@@ -35,6 +36,9 @@ import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+
+
+ACADEMIC_EXCLUDED_LANGUAGE_CODES = {"PL", "RU", "SV", "UK"}
 
 
 # ---------------------------------------------------------------------------
@@ -560,7 +564,15 @@ def generate_keys_header(
     ]
     lines.append("// V1 language.bin migration table (frozen enum order from 2f969a9)")
     lines.append("constexpr Language V1_LANGUAGES[] = {")
-    lines.append("    " + ", ".join(f"Language::{c}" for c in v1_codes) + ",")
+    active_codes = set(languages)
+    lines.append(
+        "    "
+        + ", ".join(
+            f"Language::{c}" if c in active_codes else "Language::EN"
+            for c in v1_codes
+        )
+        + ","
+    )
     lines.append("};")
     lines.append(
         f"constexpr uint8_t V1_LANGUAGE_COUNT = {len(v1_codes)};"
@@ -825,6 +837,7 @@ def main(
     src_dirs: Optional[List[str]] = None,
     strip_unused: bool = False,
     verbose: bool = False,
+    include_all_languages: bool = False,
 ) -> None:
     # Default paths (relative to project root)
     default_translations_dir = "lib/I18n/translations"
@@ -860,6 +873,20 @@ def main(
         languages, language_names, string_keys, translations, inherited_sets = (
             load_translations(translations_dir, verbose)
         )
+
+        if not include_all_languages:
+            active_indices = [
+                i
+                for i, code in enumerate(languages)
+                if code not in ACADEMIC_EXCLUDED_LANGUAGE_CODES
+            ]
+            languages = [languages[i] for i in active_indices]
+            language_names = [language_names[i] for i in active_indices]
+            inherited_sets = [inherited_sets[i] for i in active_indices]
+            translations = {
+                key: [values[i] for i in active_indices]
+                for key, values in translations.items()
+            }
 
         # --- Unused-string detection ---
         scan_dirs = [d for d in src_dirs if os.path.isdir(d)]
@@ -983,6 +1010,11 @@ if __name__ == "__main__":
         help="Remove unused STR_* keys from the generated output",
     )
     parser.add_argument(
+        "--include-all-languages",
+        action="store_true",
+        help="Include languages omitted from the space-optimized Academic firmware",
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -995,6 +1027,7 @@ if __name__ == "__main__":
         args.src_dirs,
         args.strip_unused,
         args.verbose,
+        args.include_all_languages,
     )
 else:
     try:

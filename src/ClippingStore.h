@@ -9,6 +9,7 @@ inline constexpr size_t CLIPPING_CHAPTER_TITLE_MAX = 48;
 // Keep the full academic quote for ordinary selections, but reject anything
 // larger than the bounded on-device record instead of silently truncating it.
 inline constexpr size_t CLIPPING_TEXT_MAX = 4096;
+inline constexpr size_t CLIPPING_TEXT_INITIAL_RESERVE = 512;
 inline constexpr uint16_t CLIPPING_MAX_PER_BOOK = 256;
 inline constexpr uint16_t CLIPPING_MAX_PAGE_MATCHES = 16;
 
@@ -26,6 +27,7 @@ struct Clipping {
   uint32_t textOffset = 0;
   uint16_t textLength = 0;
   uint16_t tagId = 0;
+  bool textInSidecar = false;
   char chapterTitle[CLIPPING_CHAPTER_TITLE_MAX] = {};
 };
 
@@ -50,6 +52,8 @@ class ClippingStore {
 
   bool loadForBook(const std::string& filePath, const std::string& title, const std::string& author,
                    const std::string& bookType);
+  bool loadForBook(const std::string& filePath, const std::string& title, const std::string& author,
+                   const std::string& bookType, const std::string& documentId);
   void unload();
 
   AddResult addClipping(uint16_t spineIndex, uint16_t startPage, uint16_t endPage, uint16_t pageCount,
@@ -68,12 +72,16 @@ class ClippingStore {
   const std::vector<Clipping>& getClippings() const { return clippings; }
   bool readClippingText(size_t index, std::string& out) const;
   bool readClippingText(const Clipping& clipping, std::string& out) const;
+  bool clearUnknownTagIds();
 
   static bool hasAnyClippings();
   static bool getAllClippedBooks(std::vector<ClippedBookEntry>& out);
   static void deleteForFilePath(const std::string& filePath, const std::string& bookType);
   static bool migrateForFilePath(const std::string& oldFilePath, const std::string& newFilePath,
                                  const std::string& title, const std::string& author, const std::string& bookType);
+  static bool migrateForFilePath(const std::string& oldFilePath, const std::string& newFilePath,
+                                 const std::string& title, const std::string& author, const std::string& bookType,
+                                 const std::string& documentId);
 
  private:
   static ClippingStore instance;
@@ -84,11 +92,19 @@ class ClippingStore {
   std::string bookAuthor;
   std::string bookDocumentId;
   std::string storeFilePath;
+  std::string sourceFilePath;
+  std::string sidecarSourceFilePath;
   bool dirty = false;
+  bool ready = false;
 
   bool readFromFile();
-  bool readFromFile(const std::string& path, std::vector<Clipping>& out) const;
+  bool readFromFile(const std::string& path, std::vector<Clipping>& out, uint8_t* loadedVersion = nullptr) const;
   bool writeToFile(const std::string* replacementText = nullptr, size_t replacementIndex = SIZE_MAX);
+  bool loadTagSidecar();
+  bool writeTagSidecarTemp(const std::string& primaryTempPath, const std::vector<uint32_t>& previewOffsets,
+                           const std::vector<uint16_t>& previewLengths, const std::string* replacementText,
+                           size_t replacementIndex, std::vector<uint32_t>& sidecarTextOffsets,
+                           std::vector<uint16_t>& sidecarTextLengths) const;
 };
 
 inline bool clippingStoredRangeMatchesLayout(const Clipping& clipping, const uint16_t currentPageCount,

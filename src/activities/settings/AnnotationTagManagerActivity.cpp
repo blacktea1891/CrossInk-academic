@@ -1,5 +1,6 @@
 #include "AnnotationTagManagerActivity.h"
 
+#include <Arduino.h>
 #include <Memory.h>
 
 #include <GfxRenderer.h>
@@ -12,6 +13,7 @@
 
 #include "AnnotationTagStore.h"
 #include "MappedInputManager.h"
+#include "activities/home/BookActions.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
@@ -30,7 +32,8 @@ std::string trimTagName(const std::string& value) {
   const size_t last = value.find_last_not_of(" \t\r\n");
   return value.substr(first, last - first + 1);
 }
-}
+
+}  // namespace
 
 AnnotationTagManagerActivity::AnnotationTagManagerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : Activity("AnnotationTagManager", renderer, mappedInput),
@@ -87,7 +90,11 @@ void AnnotationTagManagerActivity::openEditor(const int tagIndex) {
         const std::string name = trimTagName(keyboard->text);
         const bool saved = tagIndex < 0 ? ANNOTATION_TAGS.add(name.c_str())
                                         : ANNOTATION_TAGS.rename(static_cast<uint8_t>(tagIndex), name.c_str());
-        if (!saved) LOG_ERR("TAGS", "Could not save tag");
+        if (!saved) {
+          LOG_ERR("TAGS", "Could not save tag");
+          BookActions::drawToast(renderer, tr(STR_TAG_SAVE_FAILED));
+          delay(700);
+        }
       }
     }
     requestUpdate();
@@ -100,6 +107,8 @@ void AnnotationTagManagerActivity::showDeletePopup(const int tagIndex) {
   deletePopup.show(tr(STR_DELETE_TAG), options, 2, 0, [this, tagIndex](const int optionIndex) {
     if (optionIndex == 1 && !ANNOTATION_TAGS.remove(static_cast<uint8_t>(tagIndex))) {
       LOG_ERR("TAGS", "Could not delete tag");
+      BookActions::drawToast(renderer, tr(STR_TAG_SAVE_FAILED));
+      delay(700);
     }
     selectedIndex = std::min(selectedIndex, std::max(0, itemCount() - 1));
     requestUpdate();
