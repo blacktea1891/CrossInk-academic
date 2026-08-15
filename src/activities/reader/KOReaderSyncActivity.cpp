@@ -6,6 +6,8 @@
 #include <Logging.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <algorithm>
 #include <cassert>
@@ -24,6 +26,7 @@
 #include "activities/ActivityManager.h"
 #include "activities/home/RecentBookProgress.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "components/TouchActionButtons.h"
 #include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -42,6 +45,7 @@ struct ResultActionLayout {
   Rect buttons[2];
   int rowStep;
   int rowHeight;
+  TouchActionButtons::Layout touchLayout;
 };
 
 ResultActionLayout resultActionLayout(const Rect& screen, const ThemeMetrics& metrics, const int contentTop,
@@ -55,12 +59,24 @@ ResultActionLayout resultActionLayout(const Rect& screen, const ThemeMetrics& me
   const int reservedBottom = hasTouch ? metrics.verticalSpacing : metrics.buttonHintsHeight + metrics.verticalSpacing;
   const int latestButtonY = screen.y + screen.height - reservedBottom - buttonHeight * 2 - buttonGap;
   const int firstButtonY = std::min(desiredButtonY, latestButtonY);
-  return {
-      {Rect{buttonX, firstButtonY, buttonWidth, buttonHeight},
-       Rect{buttonX, firstButtonY + buttonHeight + buttonGap, buttonWidth, buttonHeight}},
-      buttonHeight + buttonGap,
-      buttonHeight,
-  };
+  ResultActionLayout result{{Rect{buttonX, firstButtonY, buttonWidth, buttonHeight},
+                             Rect{buttonX, firstButtonY + buttonHeight + buttonGap, buttonWidth, buttonHeight}},
+                            buttonHeight + buttonGap,
+                            buttonHeight,
+                            {}};
+  if (hasTouch) {
+    constexpr int touchHeight = TouchActionButtons::kDefaultHeight;
+    constexpr int touchGap = TouchActionButtons::kDefaultGap;
+    const int touchTotal = touchHeight * 2 + touchGap;
+    const Rect touchContainer{buttonX, std::min(firstButtonY, screen.y + screen.height - reservedBottom - touchTotal),
+                              buttonWidth, touchTotal};
+    result.touchLayout = TouchActionButtons::vertical(touchContainer, 2);
+    result.buttons[0] = result.touchLayout.buttons[0];
+    result.buttons[1] = result.touchLayout.buttons[1];
+    result.rowStep = touchHeight + touchGap;
+    result.rowHeight = touchHeight;
+  }
+  return result;
 }
 
 std::string calculateDocumentHashForMethod(const std::string& path, const DocumentMatchMethod method) {
@@ -97,7 +113,7 @@ void KOReaderSyncActivity::ensureEpubLoaded() {
     epub = std::make_shared<Epub>(epubPath, "/.crosspoint");
     epub->setupCacheDir();
     // Load metadata only (no CSS needed for progress mapping, don't rebuild if cache is missing).
-    if (!epub->load(false, true)) {
+    if (!epub->load(false, true, Epub::XLocationLoadMode::Immediate, true)) {
       LOG_ERR("KOSync", "Failed to load epub for progress mapping");
       epub.reset();
       return;
@@ -554,6 +570,8 @@ void KOReaderSyncActivity::onEnter() {
     return;
   }
 
+  LOG_INF("KOSync", "network entry free=%u maxAlloc=%u stack=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
+          static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
   ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
   lockInitialConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
 
@@ -583,6 +601,8 @@ void KOReaderSyncActivity::onEnter() {
   }
 
   // Launch WiFi selection subactivity
+  LOG_INF("KOSync", "launch WiFi selection free=%u maxAlloc=%u stack=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
+          static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
   startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, true, true),
                          [this](const ActivityResult& result) { onWifiSelectionComplete(!result.isCancelled); });
 }
@@ -592,7 +612,7 @@ void KOReaderSyncActivity::onExit() {
 
   if (wifiActivated) {
     wifiOff();
-    silentRestartToReader();
+    silentRestartToReader(true);
   }
 }
 
@@ -674,16 +694,21 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
     const auto actions = resultActionLayout(screen, metrics, top, lineHeight, mappedInput.hasTouch());
     const char* actionLabels[] = {tr(STR_APPLY_REMOTE), tr(STR_UPLOAD_LOCAL)};
-    for (int option = 0; option < 2; ++option) {
-      const Rect& button = actions.buttons[option];
-      const bool selected = selectedOption == option;
-      if (selected) {
-        renderer.fillRect(button.x, button.y, button.width, button.height);
+    if (mappedInput.hasTouch()) {
+      TouchActionButtons::draw(renderer, actions.touchLayout, actionLabels, selectedOption, selectedOption,
+                               UI_10_FONT_ID);
+    } else {
+      for (int option = 0; option < 2; ++option) {
+        const Rect& button = actions.buttons[option];
+        const bool selected = selectedOption == option;
+        if (selected) {
+          renderer.fillRect(button.x, button.y, button.width, button.height);
+        }
+        renderer.drawRect(button.x, button.y, button.width, button.height, true);
+        const int textX = button.x + (button.width - renderer.getTextWidth(UI_10_FONT_ID, actionLabels[option])) / 2;
+        const int textY = button.y + (button.height - lineHeight) / 2;
+        renderer.drawText(UI_10_FONT_ID, textX, textY, actionLabels[option], !selected);
       }
-      renderer.drawRect(button.x, button.y, button.width, button.height, true);
-      const int textX = button.x + (button.width - renderer.getTextWidth(UI_10_FONT_ID, actionLabels[option])) / 2;
-      const int textY = button.y + (button.height - lineHeight) / 2;
-      renderer.drawText(UI_10_FONT_ID, textX, textY, actionLabels[option], !selected);
     }
 
     // Bottom button hints
@@ -715,15 +740,12 @@ void KOReaderSyncActivity::render(RenderLock&&) {
   }
 
   if (state == SYNC_FAILED) {
-    UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, top, tr(STR_SYNC_FAILED_MSG), true, EpdFontFamily::BOLD);
-    const int messageWidth = screen.width - metrics.contentSidePadding * 2;
-    const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-    const auto messageLines = renderer.wrappedText(UI_10_FONT_ID, statusMessage.c_str(), messageWidth, 3);
-    int messageY = top + 40;
-    for (const auto& line : messageLines) {
-      UITheme::drawCenteredText(renderer, screen, UI_10_FONT_ID, messageY, line.c_str());
-      messageY += lineHeight + 4;
-    }
+    const Rect textArea{screen.x + metrics.contentSidePadding, screen.y, screen.width - metrics.contentSidePadding * 2,
+                        screen.height};
+    UITheme::drawCenteredWrappedText(renderer, textArea, UI_10_FONT_ID, top, tr(STR_SYNC_FAILED_MSG), 2, true,
+                                     EpdFontFamily::BOLD);
+    UITheme::drawCenteredWrappedText(renderer, textArea, UI_10_FONT_ID, top + 40, statusMessage.c_str(), 3, true,
+                                     EpdFontFamily::REGULAR, 4);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4, true);

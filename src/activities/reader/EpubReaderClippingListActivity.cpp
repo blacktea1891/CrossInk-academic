@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "AnnotationTagStore.h"
 #include "MappedInputManager.h"
 #include "activities/ActivityResult.h"
 #include "activities/home/FileBrowserActionActivity.h"
@@ -166,11 +167,12 @@ EpubReaderClippingListActivity::EpubReaderClippingListActivity(GfxRenderer& rend
 
 void EpubReaderClippingListActivity::onEnter() {
   Activity::onEnter();
+  ANNOTATION_TAGS.load();
   selectedIndex = 0;
   topIndex = 0;
   visibleRows = 1;
   uiReady = false;
-  app.setTheme(uiThemeTokens(uiTarget));
+  applySharedUiTheme(app, uiTarget);
   app.on(ACTION_ROW, &EpubReaderClippingListActivity::onRowEvent, this);
   app.setScreen(&EpubReaderClippingListActivity::listScreen, this);
   detailText.reserve(CLIPPING_TEXT_MAX);
@@ -437,21 +439,6 @@ void EpubReaderClippingListActivity::loop() {
     return;
   }
 
-  int tx = 0;
-  int ty = 0;
-  if (!longPressConfirmHandled && mappedInput.isScreenTouchLongPress(tx, ty, CLIPPING_DELETE_HOLD_MS) &&
-      listRowStep > 0 && ty >= listTop && ty < listBottom) {
-    const int offset = ty - listTop;
-    const int row = offset / listRowStep;
-    const int touchedIndex = topIndex + row;
-    if (row < visibleRows && offset % listRowStep < listRowHeight && touchedIndex < total) {
-      selectedIndex = touchedIndex;
-      mappedInput.suppressNextTouchTap();
-      longPressConfirmHandled = true;
-      showClippingActionMenu(false);
-    }
-    return;
-  }
   if (uiReady) {
     const fui::InputSnapshot snap = touchSnapshotFrom(mappedInput);
     if (snap.touchPressed || snap.touchReleased) {
@@ -493,6 +480,11 @@ void EpubReaderClippingListActivity::onRowEvent(const fui::ActionEvent& event, v
   auto* self = static_cast<EpubReaderClippingListActivity*>(user);
   if (event.value < 0 || event.value >= static_cast<int16_t>(CLIPPINGS.clippingCount())) return;
   self->selectedIndex = event.value;
+  if (event.longPress) {
+    self->app.clearTapFlash();
+    self->showClippingActionMenu(false);
+    return;
+  }
   self->app.clearTapFlash();
   self->openSelectedDetail();
 }
@@ -519,13 +511,10 @@ void EpubReaderClippingListActivity::buildListScreen(UiApp::ScreenType& screen) 
   props.count = static_cast<uint16_t>(uiItems.size());
   props.selectedIndex = static_cast<int16_t>(selectedIndex);
   props.action = ACTION_ROW;
-  props.inputMask = fui::InputTouch;
+  props.inputMask = static_cast<uint16_t>(fui::InputTouch | fui::InputLongPress);
+  props.valueInset = 8;
   const fui::Rect bounds = screen.body();
-  listTop = bounds.y;
-  listBottom = bounds.bottom();
   const auto rows = configureUiList(props, screen.theme(), bounds, UiListRowType::WithSubtitle);
-  listRowHeight = props.rowHeight;
-  listRowStep = props.rowHeight + props.rowGap;
   visibleRows = rows > 0 ? rows : 1;
   topIndex = scrollListBy(topIndex, 0, visibleRows, static_cast<int>(count));
   props.topIndex = static_cast<uint16_t>(topIndex);
@@ -540,6 +529,7 @@ void EpubReaderClippingListActivity::buildListScreen(UiApp::ScreenType& screen) 
     item = fui::ListItem{};
     item.label = uiLabels[slot].c_str();
     if (clipping) item.subtitle = clipping->chapterTitle[0] != '\0' ? clipping->chapterTitle : tr(STR_UNKNOWN_CHAPTER);
+    if (clipping) item.value = ANNOTATION_TAGS.nameForId(clipping->tagId);
     item.actionValue = static_cast<int16_t>(i);
   }
   screen.list(props);

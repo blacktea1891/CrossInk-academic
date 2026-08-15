@@ -112,7 +112,7 @@ bool formatKindleAddedOn(char* buf, const size_t bufSize) {
 
 bool ClippingsManager::saveClipping(const std::string& bookTitle, const std::string& author,
                                     const std::string& chapterTitle, const int pageNumber,
-                                    const std::string& selectedText) {
+                                    const std::string& selectedText, const char* tagName) {
   FsFile file = Storage.open(CLIPPINGS_PATH, O_RDWR | O_CREAT | O_AT_END);
   if (!file) {
     LOG_ERR("CLIP", "Failed to open %s for append", CLIPPINGS_PATH);
@@ -128,10 +128,15 @@ bool ClippingsManager::saveClipping(const std::string& bookTitle, const std::str
     location += " | ";
     location += addedOn;
   }
+  if (tagName && tagName[0] != '\0') {
+    location += " | Tag: ";
+    location += tagName;
+  }
   location += "\n";
 
-  static constexpr size_t MAX_TEXT_BYTES = 2000;
-  const size_t textLen = std::min(selectedText.size(), MAX_TEXT_BYTES);
+  // ClippingStore rejects oversized selections before this export is called.
+  // Keep the export lossless instead of applying a second, unrelated limit.
+  const size_t textLen = selectedText.size();
   static constexpr char separator[] = "\n==========\n";
 
   std::string buffer;

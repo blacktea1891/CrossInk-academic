@@ -43,6 +43,7 @@ class EpubReaderMenuActivity final : public Activity {
     VIEW_BOOKMARKS,
     DELETE_BOOKMARKS,
     SAVE_CLIPPING,
+    TAG_PAGE,
     VIEW_CLIPPINGS,
     LOOKUP,
     LOOKUP_HISTORY,
@@ -52,8 +53,9 @@ class EpubReaderMenuActivity final : public Activity {
   explicit EpubReaderMenuActivity(
       GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title, const int currentPage,
       const int totalPages, const int bookProgressPercent, const uint8_t currentOrientation, const bool hasFootnotes,
-      const bool hasDictionary, const bool hasBookmarks, const bool hasClippings, const bool isCurrentPageBookmarked,
-      const bool isBookCompleted, const bool autoPageTurnActive = false, const uint16_t autoPageTurnIntervalSeconds = 0,
+      const bool hasDictionary, const bool hasBookmarks, const bool hasClippings, const bool hasAnnotationTags,
+      const bool isCurrentPageBookmarked, const bool isBookCompleted, const bool autoPageTurnActive = false,
+      const uint16_t autoPageTurnIntervalSeconds = 0,
       const bool showReadingPaceReset = false,
       ReaderOptionsActivity::SaveSettingsCallback saveReaderSettingsCallback = nullptr,
       void* saveReaderSettingsContext = nullptr,
@@ -93,8 +95,8 @@ class EpubReaderMenuActivity final : public Activity {
   using TabMenuItems = std::array<std::vector<MenuItem>, MENU_TAB_COUNT>;
 
   static TabMenuItems buildMenuItems(bool hasFootnotes, bool hasBookmarks, bool hasClippings,
-                                     bool isCurrentPageBookmarked, bool isBookCompleted, bool showReadingPaceReset,
-                                     bool hasDictionary);
+                                     bool hasAnnotationTags, bool isCurrentPageBookmarked, bool isBookCompleted,
+                                     bool showReadingPaceReset, bool hasDictionary);
   [[nodiscard]] const std::vector<MenuItem>& activeMenuItems() const;
   [[nodiscard]] size_t activeTabIndex() const { return static_cast<size_t>(activeTab); }
   void cycleActiveTab();

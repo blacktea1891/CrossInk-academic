@@ -27,7 +27,9 @@ enum class SettingAction {
   DisplaySleepScreen,
   ReaderFontOptions,
   ReaderPageLayout,
+  QuickActions,
   ControlsPowerButton,
+  ControlsHomeButton,
   ControlsFrontButtons,
   ControlsSideButtons,
   SystemDevice,
@@ -43,6 +45,7 @@ enum class SettingAction {
   Language,
   DownloadFonts,
   ClockSync,
+  ManageAnnotationTags,
 };
 
 struct SettingInfo {
@@ -218,7 +221,8 @@ inline uint8_t settingEnumRawValueForDisplayIndex(const SettingInfo& setting, ui
 }
 
 inline bool settingShowsNavigationCaret(const SettingInfo& setting) {
-  return setting.type == SettingType::SUBMENU || setting.action == SettingAction::CustomiseStatusBar;
+  return setting.type == SettingType::SUBMENU || setting.action == SettingAction::CustomiseStatusBar ||
+         setting.action == SettingAction::QuickActions;
 }
 
 class SettingsActivity final : public Activity {
@@ -236,6 +240,7 @@ class SettingsActivity final : public Activity {
   std::vector<SettingInfo> readerPageLayoutSettings;
   std::vector<SettingInfo> controlsSettings;
   std::vector<SettingInfo> controlsPowerSettings;
+  std::vector<SettingInfo> controlsHomeButtonSettings;
   std::vector<SettingInfo> controlsFrontButtonSettings;
   std::vector<SettingInfo> controlsSideButtonSettings;
   std::vector<SettingInfo> systemSettings;
@@ -250,6 +255,9 @@ class SettingsActivity final : public Activity {
   // The frontlight-panel shortcut opens Settings as a transient Home menu.
   // Its swipe-up closes the screen; regular Settings keeps swipe scrolling.
   bool dismissOnUpSwipe = false;
+  // Settings can be created over a landscape reader. Its teardown resets the
+  // renderer before this activity enters, so retain the requested layout.
+  GfxRenderer::Orientation entryOrientation;
   bool showSettingSelection = true;
   SettingAction activeSubmenu = SettingAction::None;
   SettingAction parentSubmenu = SettingAction::None;
@@ -297,6 +305,7 @@ class SettingsActivity final : public Activity {
 
  public:
   explicit SettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool dismissOnUpSwipe = false);
+  bool allowGlobalHomeSwipeGesture() const override { return false; }
   void onEnter() override;
   void onExit() override;
   void loop() override;

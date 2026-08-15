@@ -6,7 +6,9 @@
 #include <vector>
 
 inline constexpr size_t CLIPPING_CHAPTER_TITLE_MAX = 48;
-inline constexpr size_t CLIPPING_TEXT_MAX = 512;
+// Keep the full academic quote for ordinary selections, but reject anything
+// larger than the bounded on-device record instead of silently truncating it.
+inline constexpr size_t CLIPPING_TEXT_MAX = 4096;
 inline constexpr uint16_t CLIPPING_MAX_PER_BOOK = 256;
 inline constexpr uint16_t CLIPPING_MAX_PAGE_MATCHES = 16;
 
@@ -23,6 +25,7 @@ struct Clipping {
   uint32_t layoutSignature = 0;
   uint32_t textOffset = 0;
   uint16_t textLength = 0;
+  uint16_t tagId = 0;
   char chapterTitle[CLIPPING_CHAPTER_TITLE_MAX] = {};
 };
 
@@ -39,6 +42,7 @@ class ClippingStore {
   enum class AddResult : uint8_t {
     Added,
     LimitReached,
+    TextTooLong,
     SaveFailed,
   };
 
@@ -50,7 +54,8 @@ class ClippingStore {
 
   AddResult addClipping(uint16_t spineIndex, uint16_t startPage, uint16_t endPage, uint16_t pageCount,
                         uint16_t startWordIndex, uint16_t endWordIndex, uint16_t wordCount, const char* chapterTitle,
-                        uint16_t paragraphIndex, const std::string& text, uint32_t layoutSignature);
+                        uint16_t paragraphIndex, const std::string& text, uint32_t layoutSignature,
+                        uint16_t tagId = 0);
   bool stampMissingLayoutSignature(uint32_t layoutSignature);
   bool removeClippingAt(size_t index);
   bool saveToFile();
@@ -77,6 +82,7 @@ class ClippingStore {
   std::string bookFilePath;
   std::string bookTitle;
   std::string bookAuthor;
+  std::string bookDocumentId;
   std::string storeFilePath;
   bool dirty = false;
 

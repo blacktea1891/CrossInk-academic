@@ -11,10 +11,13 @@
 #include <cstring>
 #include <functional>
 
+#include "KOReaderDocumentId.h"
+
 namespace {
 constexpr uint8_t LEGACY_VERSION = 1;
 constexpr uint8_t TEXT_OFFSET_VERSION = 2;
-constexpr uint8_t VERSION = 3;
+constexpr uint8_t LAYOUT_SIGNATURE_VERSION = 3;
+constexpr uint8_t VERSION = 4;
 constexpr size_t INITIAL_CLIPPING_RESERVE = 4;
 constexpr char CLIPPINGS_DIR[] = "/.crosspoint/clippings";
 constexpr size_t TEXT_COPY_BUFFER_SIZE = 128;
@@ -47,11 +50,19 @@ bool readClippingFileHeader(const std::string& fullPath, const char* name, Clipp
   uint8_t version = 0;
   uint16_t count = 0;
   if (!serialization::tryReadPod(f, version) ||
-      (version != LEGACY_VERSION && version != TEXT_OFFSET_VERSION && version != VERSION) ||
+      (version != LEGACY_VERSION && version != TEXT_OFFSET_VERSION && version != LAYOUT_SIGNATURE_VERSION &&
+       version != VERSION) ||
       !serialization::tryReadPod(f, count) || !serialization::tryReadString(f, header.title) ||
       !serialization::tryReadString(f, header.author) || !serialization::tryReadString(f, header.path)) {
     f.close();
     return false;
+  }
+  if (version >= VERSION) {
+    std::string documentId;
+    if (!serialization::tryReadString(f, documentId)) {
+      f.close();
+      return false;
+    }
   }
   f.close();
 
@@ -96,6 +107,7 @@ bool ClippingStore::loadForBook(const std::string& filePath, const std::string& 
   bookFilePath = filePath;
   bookTitle = title;
   bookAuthor = author;
+  bookDocumentId = KOReaderDocumentId::calculate(filePath);
   dirty = false;
   clippings.clear();
   if (clippings.capacity() < INITIAL_CLIPPING_RESERVE) {
@@ -116,6 +128,7 @@ void ClippingStore::unload() {
   bookFilePath.clear();
   bookTitle.clear();
   bookAuthor.clear();
+  bookDocumentId.clear();
   storeFilePath.clear();
   dirty = false;
 }
@@ -125,10 +138,15 @@ ClippingStore::AddResult ClippingStore::addClipping(const uint16_t spineIndex, c
                                                     const uint16_t startWordIndex, const uint16_t endWordIndex,
                                                     const uint16_t wordCount, const char* chapterTitle,
                                                     const uint16_t paragraphIndex, const std::string& text,
-                                                    const uint32_t layoutSignature) {
+                                                    const uint32_t layoutSignature, const uint16_t tagId) {
   if (clippings.size() >= CLIPPING_MAX_PER_BOOK) {
     LOG_ERR("CLIP", "Clipping limit (%u) reached", CLIPPING_MAX_PER_BOOK);
     return AddResult::LimitReached;
+  }
+  if (text.size() > CLIPPING_TEXT_MAX) {
+    LOG_ERR("CLIP", "Clipping text length %u exceeds max %u", static_cast<unsigned>(text.size()),
+            static_cast<unsigned>(CLIPPING_TEXT_MAX));
+    return AddResult::TextTooLong;
   }
 
   Clipping clipping;
@@ -142,8 +160,9 @@ ClippingStore::AddResult ClippingStore::addClipping(const uint16_t spineIndex, c
   clipping.paragraphIndex = paragraphIndex;
   clipping.timestamp = static_cast<uint32_t>(millis() / 1000UL);
   clipping.layoutSignature = layoutSignature;
+  clipping.tagId = tagId;
   copyBounded(clipping.chapterTitle, sizeof(clipping.chapterTitle), chapterTitle);
-  clipping.textLength = static_cast<uint16_t>(std::min(text.size(), CLIPPING_TEXT_MAX));
+  clipping.textLength = static_cast<uint16_t>(text.size());
 
   clippings.push_back(std::move(clipping));
   dirty = true;
@@ -263,11 +282,30 @@ bool ClippingStore::readFromFile(const std::string& path, std::vector<Clipping>&
   std::string author;
   std::string storedPath;
   if (!serialization::tryReadPod(f, version) ||
-      (version != LEGACY_VERSION && version != TEXT_OFFSET_VERSION && version != VERSION) ||
+      (version != LEGACY_VERSION && version != TEXT_OFFSET_VERSION && version != LAYOUT_SIGNATURE_VERSION &&
+       version != VERSION) ||
       !serialization::tryReadPod(f, count) || !serialization::tryReadString(f, title) ||
       !serialization::tryReadString(f, author) || !serialization::tryReadString(f, storedPath)) {
     f.close();
     LOG_ERR("CLIP", "Failed to read clipping header: %s", path.c_str());
+    return false;
+  }
+
+  if (storedPath != bookFilePath) {
+    LOG_ERR("CLIP", "Clipping file path mismatch, ignoring stale file: %s", path.c_str());
+    f.close();
+    return false;
+  }
+
+  std::string storedDocumentId;
+  if (version >= VERSION && !serialization::tryReadString(f, storedDocumentId)) {
+    f.close();
+    LOG_ERR("CLIP", "Clipping file missing document identity: %s", path.c_str());
+    return false;
+  }
+  if (!storedDocumentId.empty() && storedDocumentId != bookDocumentId) {
+    LOG_ERR("CLIP", "Clipping file document identity mismatch, ignoring stale file: %s", path.c_str());
+    f.close();
     return false;
   }
 
@@ -289,9 +327,14 @@ bool ClippingStore::readFromFile(const std::string& path, std::vector<Clipping>&
       LOG_ERR("CLIP", "Clipping file truncated at record %u: %s", i, path.c_str());
       return false;
     }
-    if (version >= VERSION && !serialization::tryReadPod(f, clipping.layoutSignature)) {
+    if (version >= LAYOUT_SIGNATURE_VERSION && !serialization::tryReadPod(f, clipping.layoutSignature)) {
       f.close();
       LOG_ERR("CLIP", "Clipping file truncated at layout signature, record %u: %s", i, path.c_str());
+      return false;
+    }
+    if (version >= VERSION && !serialization::tryReadPod(f, clipping.tagId)) {
+      f.close();
+      LOG_ERR("CLIP", "Clipping file truncated at tag ID, record %u: %s", i, path.c_str());
       return false;
     }
     if (f.read(reinterpret_cast<uint8_t*>(clipping.chapterTitle), sizeof(clipping.chapterTitle)) !=
@@ -341,6 +384,10 @@ bool ClippingStore::readFromFile(const std::string& path, std::vector<Clipping>&
 }
 
 bool ClippingStore::writeToFile(const std::string* replacementText, const size_t replacementIndex) {
+  if (replacementText && replacementText->size() > CLIPPING_TEXT_MAX) {
+    LOG_ERR("CLIP", "Refusing to write oversized clipping text");
+    return false;
+  }
   Storage.mkdir("/.crosspoint");
   Storage.mkdir(CLIPPINGS_DIR);
 
@@ -377,7 +424,7 @@ bool ClippingStore::writeToFile(const std::string* replacementText, const size_t
   newTextLengths.reserve(count);
   if (!serialization::tryWritePod(f, VERSION) || !serialization::tryWritePod(f, count) ||
       !serialization::tryWriteString(f, bookTitle) || !serialization::tryWriteString(f, bookAuthor) ||
-      !serialization::tryWriteString(f, bookFilePath)) {
+      !serialization::tryWriteString(f, bookFilePath) || !serialization::tryWriteString(f, bookDocumentId)) {
     LOG_ERR("CLIP", "Failed to write clipping header: %s", tmpPath.c_str());
     f.close();
     if (source) source.close();
@@ -393,6 +440,7 @@ bool ClippingStore::writeToFile(const std::string* replacementText, const size_t
         !serialization::tryWritePod(f, clipping.endWordIndex) || !serialization::tryWritePod(f, clipping.wordCount) ||
         !serialization::tryWritePod(f, clipping.paragraphIndex) || !serialization::tryWritePod(f, clipping.timestamp) ||
         !serialization::tryWritePod(f, clipping.layoutSignature) ||
+        !serialization::tryWritePod(f, clipping.tagId) ||
         f.write(reinterpret_cast<const uint8_t*>(clipping.chapterTitle), sizeof(clipping.chapterTitle)) !=
             sizeof(clipping.chapterTitle)) {
       LOG_ERR("CLIP", "Failed to write clipping record %u: %s", i, storeFilePath.c_str());
@@ -403,9 +451,7 @@ bool ClippingStore::writeToFile(const std::string* replacementText, const size_t
     }
 
     const bool useReplacement = replacementText && i == replacementIndex;
-    const uint16_t textLen = useReplacement
-                                 ? static_cast<uint16_t>(std::min(replacementText->size(), CLIPPING_TEXT_MAX))
-                                 : clipping.textLength;
+    const uint16_t textLen = useReplacement ? static_cast<uint16_t>(replacementText->size()) : clipping.textLength;
     if (!serialization::tryWritePod(f, textLen)) {
       LOG_ERR("CLIP", "Failed to write clipping text length %u: %s", i, tmpPath.c_str());
       f.close();
@@ -508,6 +554,10 @@ bool ClippingStore::migrateForFilePath(const std::string& oldFilePath, const std
 
   ClippingStore reader;
   std::vector<Clipping> migratedClippings;
+  reader.bookFilePath = oldFilePath;
+  // The built-in move flow calls this after the EPUB itself has moved. Use
+  // the destination content to authenticate the source annotation file.
+  reader.bookDocumentId = KOReaderDocumentId::calculate(newFilePath);
   if (!reader.readFromFile(oldStorePath, migratedClippings)) {
     return false;
   }
@@ -516,6 +566,7 @@ bool ClippingStore::migrateForFilePath(const std::string& oldFilePath, const std
   writer.bookFilePath = newFilePath;
   writer.bookTitle = title;
   writer.bookAuthor = author;
+  writer.bookDocumentId = KOReaderDocumentId::calculate(newFilePath);
   writer.storeFilePath = oldStorePath;
   writer.clippings = std::move(migratedClippings);
   if (!writer.writeToFile()) {

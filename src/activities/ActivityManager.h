@@ -10,8 +10,10 @@
 #include <string>
 #include <vector>
 
+#include "CrossPointSettings.h"
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "util/QuickLockTrigger.h"
 #include "util/ScreenshotInfo.h"
 
 #ifndef portMUX_INITIALIZER_UNLOCKED
@@ -56,6 +58,14 @@ class ActivityManager {
   std::unique_ptr<Activity> pendingActivity;
   enum class PendingAction { None, Push, Pop, Replace };
   PendingAction pendingAction = PendingAction::None;
+  // Set when an overlay is closed specifically to hand control back to the
+  // reader's menu. It must wait until the reader is current again.
+  bool openReaderMenuAfterPop = false;
+
+  // A one-shot Home selection to restore after Settings replaces Home. This
+  // is intentionally not persisted as recent-book order.
+  std::string preferredHomeBookPath;
+  bool returningHomeThroughSettings = false;
 
   // Task to render and display the activity
   TaskHandle_t renderTaskHandle = nullptr;
@@ -97,6 +107,7 @@ class ActivityManager {
   void goToCalibreWireless(const std::string& returnBookPath = {});
   void goToJoinNetworkFileTransfer(const std::string& returnBookPath = {});
   void goToHotspotFileTransfer(const std::string& returnBookPath = {});
+  void goToUsbDrive();
   bool resumeFileTransferFromNetworkBoot(uint32_t payload);
   void goToNearbyStatsSync();
   void goToNearbyBookSend(std::string path, bool returnToReader);
@@ -122,15 +133,23 @@ class ActivityManager {
   void popActivity();
 
   bool preventAutoSleep() const;
+  bool requiresExclusiveStorageLoop() const;
   bool isHomeActivity() const;
   bool isReaderActivity() const;
   bool readerPowerButtonOpensSettings() const;
+  bool handleHomeButtonBackOrHome();
+  bool openReaderMenuFromShortcut();
+  bool openReaderMenuAfterClosingOverlay();
+  bool handleShortcutAction(uint8_t action);
   bool hasActivityNamed(const char* activityName) const;
 #ifdef SIMULATOR
   bool isCurrentActivityNamed(const char* activityName) const;
 #endif
   bool canSnapshotForSleepOverlay() const;
   bool requestManualReaderRefresh();
+  bool handleShortcutAction(CrossPointSettings::SHORT_PWRBTN action);
+  bool handleQuickLockUnlock(QuickLockTrigger trigger);
+  void notifyInputLockChanged(bool locked);
   bool skipLoopDelay() const;
   std::string getCurrentBookPath() const;
   ScreenshotInfo getScreenshotInfo() const;

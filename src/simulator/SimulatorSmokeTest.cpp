@@ -177,11 +177,15 @@ class SimulatorSmokeTest {
         break;
 
       case SmokeStep::RecentBooks:
+        if (mappedInputManager.hasHomeKey()) {
+          renderer.setOrientation(GfxRenderer::Orientation::LandscapeCounterClockwise);
+        }
         activityManager.goToSettings();
-        queueStep("Settings", SmokeStep::Settings);
+        queueStep(mappedInputManager.hasHomeKey() ? "Settings landscape" : "Settings", SmokeStep::Settings);
         break;
 
       case SmokeStep::Settings:
+        renderer.setOrientation(GfxRenderer::Orientation::Portrait);
         activityManager.replaceActivity(std::make_unique<ReaderOptionsActivity>(renderer, mappedInputManager));
         queueStep("Reader Options", SmokeStep::ReaderOptions);
         break;
@@ -189,7 +193,8 @@ class SimulatorSmokeTest {
       case SmokeStep::ReaderOptions:
         activityManager.replaceActivity(
             std::make_unique<EpubReaderMenuActivity>(renderer, mappedInputManager, "Smoke Test", 1, 1, 0,
-                                                     SETTINGS.orientation, false, false, false, false, false, false));
+                                                     SETTINGS.orientation, false, false, false, false, false, false,
+                                                     false));
         queueStep("Reader Menu", SmokeStep::ReaderMenu);
         break;
 
@@ -317,6 +322,14 @@ class SimulatorSmokeTest {
         inputScript.push_back(render("Reader restored after top-edge swipe dismisses Reader Menu", 4));
         inputScript.push_back(assertActivity("EpubReader"));
         inputScript.push_back(disableReaderTouch());
+        inputScript.push_back(homeLongPress());
+        inputScript.push_back(render("Reader Menu opened from Home key hold with touch disabled", 4));
+        inputScript.push_back(assertActivity("EpubReaderMenu"));
+        inputScript.push_back(touchDown(width / 2, 8));
+        inputScript.push_back(touchMove(width / 2, height / 4));
+        inputScript.push_back(touchRelease(width / 2, height / 4));
+        inputScript.push_back(render("Reader restored after Home key menu with touch disabled", 4));
+        inputScript.push_back(assertActivity("EpubReader"));
         inputScript.push_back(homeTap());
         inputScript.push_back(render("Home opened from simulated Home key tap", 4));
         inputScript.push_back(assertActivity("Home"));

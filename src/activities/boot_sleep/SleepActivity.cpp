@@ -26,6 +26,7 @@
 #include "CrossPointState.h"
 #include "RecentBooksStore.h"
 #include "SleepCoverAssets.h"
+#include "SleepImageIndex.h"
 #include "activities/reader/ReaderUtils.h"
 #include "components/UITheme.h"
 #include "components/themes/dashboard/DashboardTheme.h"
@@ -309,22 +310,29 @@ bool tryOpenSleepDirectory(FsFile& dir, std::string& sleepDir, const std::string
   return false;
 }
 
-bool openPreferredSleepDirectory(FsFile& dir, std::string& sleepDir) {
+bool resolvePreferredSleepDirectory(std::string& sleepDir) {
   sleepDir.clear();
 
-  if (tryOpenSleepDirectory(dir, sleepDir, APP_STATE.preferredSleepFolderPath)) {
+  const auto folderExists = [&sleepDir](const std::string& candidate) {
+    if (candidate.empty() || !Storage.exists(candidate.c_str())) return false;
+    sleepDir = candidate;
     return true;
-  }
+  };
+
+  if (folderExists(APP_STATE.preferredSleepFolderPath)) return true;
 
   if (!APP_STATE.preferredSleepFolderPath.empty()) {
     LOG_INF("SLP", "Preferred sleep folder missing, falling back: %s", APP_STATE.preferredSleepFolderPath.c_str());
   }
 
-  if (tryOpenSleepDirectory(dir, sleepDir, "/.sleep")) {
-    return true;
-  }
+  if (folderExists("/.sleep")) return true;
+  return folderExists("/sleep");
+}
 
-  return tryOpenSleepDirectory(dir, sleepDir, "/sleep");
+bool openPreferredSleepDirectory(FsFile& dir, std::string& sleepDir) {
+  if (!resolvePreferredSleepDirectory(sleepDir)) return false;
+
+  return tryOpenSleepDirectory(dir, sleepDir, sleepDir);
 }
 
 bool selectPinnedSleepImage(SleepImageMode mode, SleepImageSelection& selection) {
@@ -363,11 +371,24 @@ bool selectRandomSleepImage(SleepImageMode mode, SleepImageSelection& selection,
                             bool bmpOnly = false) {
   FsFile dir;
   std::string sleepDir;
-  if (!openPreferredSleepDirectory(dir, sleepDir)) {
-    return false;
-  }
+  if (!resolvePreferredSleepDirectory(sleepDir)) return false;
 
   const bool allowPng = mode == SleepImageMode::Overlay && !bmpOnly;
+  SleepImageIndex::Selection indexedSelection;
+  if (SleepImageIndex::select(sleepDir, allowPng, validateBmpHeaders, APP_STATE,
+                              std::min(APP_STATE.recentSleepFill, CrossPointState::SLEEP_RECENT_COUNT),
+                              indexedSelection)) {
+    selection.path = std::move(indexedSelection.path);
+    selection.isPng = indexedSelection.isPng;
+    APP_STATE.pushRecentSleep(indexedSelection.index);
+    APP_STATE.saveToFile();
+    return true;
+  }
+
+  // Cache creation is best-effort. Reopen the directory only for the legacy
+  // reservoir fallback when the cache could not be loaded or written.
+  if (!openPreferredSleepDirectory(dir, sleepDir)) return false;
+
   // Keep one reservoir for every candidate and one that excludes recent images.
   // This avoids holding the whole directory in RAM or opening every BMP just to
   // parse its header before picking one.
@@ -472,8 +493,18 @@ void SleepActivity::onEnter() {
     return renderLastScreenSleepScreen();
   }
 
+  const auto sleepScreen = SETTINGS.sleepScreen;
+  const bool sleepScreenUsesRecentBooks = sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::READING_STATS_SLEEP ||
+                                          sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::MINIMAL_SLEEP ||
+                                          sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::MINIMAL_STATS_SLEEP ||
+                                          sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::DASHBOARD_SLEEP;
+  const std::string& recentBookPath = currentBookPath.empty() ? APP_STATE.openEpubPath : currentBookPath;
+  if (sleepScreenUsesRecentBooks && !recentBookPath.empty()) {
+    RECENT_BOOKS.ensureLoaded();
+  }
+
   overlayBackgroundBufferStored =
-      SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY && renderer.storeBwBuffer();
+      sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY && renderer.storeBwBuffer();
 
   // Show the popup in the orientation that was visible before reader exit restores
   // global settings. Reset to portrait afterwards so sleep screen layout stays unchanged.
@@ -485,7 +516,7 @@ void SleepActivity::onEnter() {
     GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
   }
 
-  switch (SETTINGS.sleepScreen) {
+  switch (sleepScreen) {
     case (CrossPointSettings::SLEEP_SCREEN_MODE::BLANK):
       return renderBlankSleepScreen();
     case (CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM):
