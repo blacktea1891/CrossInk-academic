@@ -14,6 +14,7 @@
 
 #include "AnnotationTagStore.h"
 #include "KOReaderDocumentId.h"
+#include "NoteStore.h"
 #include "util/AtomicFile.h"
 
 namespace {
@@ -852,6 +853,7 @@ void ClippingStore::deleteForFilePath(const std::string& filePath, const std::st
   for (const std::string& candidate : paths) {
     if (Storage.exists(candidate.c_str())) Storage.remove(candidate.c_str());
   }
+  if (bookType == "epub") NoteStore::deleteForFilePath(filePath);
 }
 
 bool ClippingStore::migrateForFilePath(const std::string& oldFilePath, const std::string& newFilePath,
