@@ -1,7 +1,15 @@
-## [Unreleased]
+## [v1.5.2] - 2026-08-16
 
 ### Added
 
+- Academic notes and highlights backed by the compatible NoteStore, with
+  content-derived document identity and migration support for existing files.
+- A web **Highlights** page at `/highlights` for searching, filtering, editing,
+  tagging, and exporting notes associated with EPUB clippings.
+- User-defined academic annotation tags for EPUB clippings and tagged pages,
+  including the existing ClippingStore v4 format and compatibility behavior.
+- Project Gutenberg as a bundled OPDS catalog, with one-time migration for
+  existing OPDS configurations and direct EPUB downloads.
 - User-defined annotation tags can be managed from Reader settings and assigned to EPUB clippings or the current page.
 - Tagged pages show a compact indicator in the reader status bar, and clipping exports include the assigned tag.
 - Persistent last-known-good backups protect annotation tags, page tags, and clippings from interrupted SD-card writes.
@@ -13,6 +21,11 @@
 - Page tags now use fractional chapter progress, so they survive font, margin, spacing, and orientation changes.
 - The Academic binary omits Polish, Russian, Swedish, and Ukrainian translation and hyphenation data while retaining their source files.
 - Removed unused generated Bitter and Lexend Deca 18/20-point headers; emoji support and compiled 10/12/14/16-point fonts are unchanged.
+- Clipping files now include a content-derived document identity so stale annotations are not applied to a different EPUB at the same path.
+- Clipping selection now shows the Up/Down side-button actions on non-touch readers, while ordinary clipping reads reserve only a small initial text buffer and grow up to the existing 4096-byte limit when needed.
+- Persistent stores and reader caches now attempt to recreate missing SD-card directories when a write fails.
+- OPDS downloads identify this fork in the HTTP User-Agent, and the bundled
+  Gutenberg catalog uses the official XML OPDS feed.
 
 ### Fixed
 
@@ -23,6 +36,10 @@
 - Annotation pickers always resume the reading-pace timer on every return path.
 - Clipping text buffers start at 512 bytes and grow only when needed instead of reserving 4096 bytes eagerly.
 - Book moves refuse to overwrite unrelated annotation destinations and clean up temporary and backup generations safely.
+- Network activities now stop their local server, DNS, and mDNS resources before disconnecting Wi-Fi or requesting the heap-clearing restart.
+- Choosing a clipping tag no longer leaves the reading-pace timer paused when selection setup exits early.
+- Notes whose clippings are deleted are pruned, preventing orphaned academic
+  notes from appearing in per-book counts or exports.
 
 ## [v1.5.1] - 2026-08-12
 
