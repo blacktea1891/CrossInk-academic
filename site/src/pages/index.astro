@@ -9,20 +9,20 @@ const featuredDocs = docs.filter((doc) =>
 ---
 
 <SiteLayout
-  title="CrossInk"
-  description="Modern open-source e-reader firmware for Xteink X4 and X3 devices."
+  title="CrossInk Academic"
+  description="Academic-focused e-reader firmware for Xteink X4 and X3 devices."
   pageClass="home"
 >
   <section slot="hero" class="hero">
     <div class="hero-copy">
-      <p class="eyebrow">A personal fork of <a href="https://crosspointreader.com/">CrossPoint</a></p>
-      <h1>Cross<span class="crossink-serif">I</span>nk</h1>
+      <p class="eyebrow">A research-focused fork of <a href="https://crosspointreader.com/">CrossPoint</a></p>
+      <h1>Cross<span class="crossink-serif">Ink</span><br />Academic</h1>
       <p class="hero-text">
-        Minimal reading stats and improved UX.
+        Academic notes, highlights, annotation tags, and open-book discovery for Xteink readers.
       </p>
       <div class="hero-actions">
-        <a class="button primary" href="/installation.html">Installation Instructions</a>
-        <a class="button" href="/reader-features.html">Explore features</a>
+        <a class="button primary" href="https://github.com/jbfarias/CrossInk-academic/releases/tag/v1.5.2">Download v1.5.2</a>
+        <a class="button" href="/installation.html">Installation Instructions</a>
       </div>
     </div>
     <img
@@ -31,6 +31,35 @@ const featuredDocs = docs.filter((doc) =>
       class="hero-image"
       loading="eager"
     />
+  </section>
+
+  <section class="release-section" aria-labelledby="release-title">
+    <div class="section-heading">
+      <p class="eyebrow">Official release</p>
+      <h2 id="release-title">CrossInk Academic v1.5.2</h2>
+    </div>
+    <p>
+      The current release preserves the fork's ClippingStore v4 format and document identity while adding compatible academic notes, highlights, user-defined tags, and Project Gutenberg as a bundled OPDS catalog.
+    </p>
+    <div class="hero-actions">
+      <a class="button primary" href="https://github.com/jbfarias/CrossInk-academic/releases/download/v1.5.2/firmware-x3-x4-v1.5.2.bin">Firmware X3/X4</a>
+      <a class="button" href="https://github.com/jbfarias/CrossInk-academic/releases/download/v1.5.2/firmware-x3-x4-debug-v1.5.2.bin">Firmware X3/X4 (logger)</a>
+      <a class="button" href="https://github.com/jbfarias/CrossInk-academic/releases/tag/v1.5.2">Release notes</a>
+    </div>
+    <div class="intro-grid">
+      <div>
+        <span>Annotations</span>
+        <strong>Notes, highlights, academic tags, and the web `/highlights` page.</strong>
+      </div>
+      <div>
+        <span>Open books</span>
+        <strong>Project Gutenberg is included as an official OPDS catalog.</strong>
+      </div>
+      <div>
+        <span>Diagnostics</span>
+        <strong>The logger build enables detailed serial logs and writes a crash report to the SD card after a panic.</strong>
+      </div>
+    </div>
   </section>
 
   <section class="section-heading">

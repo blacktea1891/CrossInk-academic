@@ -130,6 +130,8 @@ The fastest way to install Crossink is by using Inky, Crossink's web companion a
 
 Download a `firmware-*.bin` from the [CrossInk Academic releases page](https://github.com/jbfarias/CrossInk-academic/releases), then flash it with the web installer or command line.
 
+For **v1.5.2**, use the standard [X3/X4 firmware](https://github.com/jbfarias/CrossInk-academic/releases/download/v1.5.2/firmware-x3-x4-v1.5.2.bin) for everyday use. The [X3/X4 logger firmware](https://github.com/jbfarias/CrossInk-academic/releases/download/v1.5.2/firmware-x3-x4-debug-v1.5.2.bin) enables detailed serial diagnostics and writes a crash report to the SD card after a panic; use it for troubleshooting rather than as the normal build.
+
 See [Installation](./docs/installation.md) for step-by-step flashing and revert instructions.
 
 ---

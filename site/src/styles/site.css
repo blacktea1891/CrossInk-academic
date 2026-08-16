@@ -294,6 +294,23 @@ h1 {
   display: none;
 }
 
+.release-section {
+  margin: 0 0 64px;
+  padding: 28px clamp(20px, 3vw, 36px) 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.release-section p:not(.eyebrow) {
+  max-width: 860px;
+  color: var(--text-soft);
+}
+
+.release-section .intro-grid {
+  margin-bottom: 24px;
+}
+
 .docs-sidebar {
   position: sticky;
   top: 88px;

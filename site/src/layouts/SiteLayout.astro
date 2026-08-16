@@ -10,8 +10,12 @@ type Props = {
 };
 
 const docs = await getDocs();
-const { title = 'CrossInk', description = 'CrossInk firmware documentation', pageClass = '' } = Astro.props;
-const pageTitle = title === 'CrossInk' ? title : `${title} | CrossInk`;
+const {
+  title = 'CrossInk Academic',
+  description = 'Academic-focused e-reader firmware documentation',
+  pageClass = '',
+} = Astro.props;
+const pageTitle = title === 'CrossInk Academic' ? title : `${title} | CrossInk Academic`;
 const currentDoc = docs.find((doc) => Astro.url.pathname === doc.url);
 ---
 
@@ -43,8 +47,8 @@ const currentDoc = docs.find((doc) => Astro.url.pathname === doc.url);
       <a class="brand" href="/">
         <img class="brand-mark" src="/logo.png" alt="" aria-hidden="true" />
         <span>
-          <strong>CrossInk</strong>
-          <small>E-reader Firmware</small>
+          <strong>CrossInk Academic</strong>
+          <small>Academic E-reader Firmware</small>
         </span>
       </a>
       <nav class="top-nav" aria-label="Primary navigation">
@@ -52,7 +56,7 @@ const currentDoc = docs.find((doc) => Astro.url.pathname === doc.url);
         <a href="/installation.html">Install</a>
         <a href="/reader-features.html">Features</a>
         <a href="https://inky.crossink.dev">Inky</a>
-        <a href="https://github.com/uxjulia/CrossInk">GitHub</a>
+        <a href="https://github.com/jbfarias/CrossInk-academic">GitHub</a>
         <button type="button" class="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">
           <svg
             class="icon-moon"

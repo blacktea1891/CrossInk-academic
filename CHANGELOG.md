@@ -29,6 +29,7 @@
 
 ### Fixed
 
+- The release build now pins the FreeInk SDK revision required by the Academic UI, keeping the `main` branch reproducibly compilable.
 - Forward line-end selection now uses the actual reading-order size instead of an unrelated container size.
 - Oversized clipping selections now report an explicit error instead of being silently truncated.
 - Failed annotation-store reads can no longer be followed by an empty overwrite that silently deletes all tags.
