@@ -1,10 +1,25 @@
-# Academic Annotation Integration on CrossInk Academic v1.5.2
+# Academic Annotation Integration on CrossInk Academic v1.6.1
 
-This integration is part of the official CrossInk Academic v1.5.2 release.
+This integration is part of the official CrossInk Academic v1.6.1 release.
 The original merge work was based on CrossInk v1.5.1-rc-2 and is retained here
 for compatibility and migration history.
 
 ## RC3 hardening work
+
+## v1.6.1 release packaging
+
+The v1.6.1 release publishes one complete academic feature set for each
+supported hardware family:
+
+- `firmware-x3-x4-v1.6.1.bin` for Xteink X3/X4.
+- `firmware-x4-pro-v1.6.1.bin` for Xteink X4 Pro.
+- `firmware-sticky-v1.6.1.bin` for Seeed Studio Sticky.
+
+Notes, highlights, clippings, bookmarks, page tags, annotation tags, and the
+web `/highlights` page are compiled into all three builds. The release also
+updates the product identity to CrossInk Academic and carries the compatible
+EPUB and transparent-sleep robustness fixes selected from the upstream RC2
+improvements.
 
 The next Academic release hardens the RC2 annotation patch without removing
 emoji support or changing the 4096-byte clipping limit:
@@ -30,7 +45,7 @@ See `docs/file-formats.md` for the compatibility matrix and sidecar layout.
 
 ## Base
 
-- Release: `v1.5.2`
+- Release: `v1.6.1`
 - Original CrossInk base tag: `v1.5.1-rc-2`
 - Base commit: `09d0045e3eae1a519974b7b5c1b889243e5e6da0`
 - Release branch: `development`
@@ -62,7 +77,9 @@ compatibility behavior.
 - KOReader Sync and OPDS ESP32-S3 render-stack routing in `src/main.cpp`.
 - RC2 memory, reader, network, and FreeInkUI changes outside the academic patch.
 
-The academic patch does not modify `src/main.cpp`; the RC2 stack-overflow fixes remain unchanged.
+The academic annotation merge remains compatible with the RC2 stack-overflow
+fixes. The v1.6.1 release additionally updates `src/main.cpp` for the final
+CrossInk Academic startup identity.
 
 ## Manual merge resolutions
 

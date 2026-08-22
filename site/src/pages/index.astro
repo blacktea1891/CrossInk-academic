@@ -10,7 +10,7 @@ const featuredDocs = docs.filter((doc) =>
 
 <SiteLayout
   title="CrossInk Academic"
-  description="Academic-focused e-reader firmware for Xteink X4 and X3 devices."
+  description="Academic-focused e-reader firmware for Xteink X3, X4, X4 Pro, and Sticky devices."
   pageClass="home"
 >
   <section slot="hero" class="hero">
@@ -21,7 +21,7 @@ const featuredDocs = docs.filter((doc) =>
         Academic notes, highlights, annotation tags, and open-book discovery for Xteink readers.
       </p>
       <div class="hero-actions">
-        <a class="button primary" href="https://github.com/jbfarias/CrossInk-academic/releases/tag/v1.5.2">Download v1.5.2</a>
+        <a class="button primary" href="https://github.com/jbfarias/CrossInk-academic/releases/tag/v1.6.1">Download v1.6.1</a>
         <a class="button" href="/installation.html">Installation Instructions</a>
       </div>
     </div>
@@ -36,15 +36,16 @@ const featuredDocs = docs.filter((doc) =>
   <section class="release-section" aria-labelledby="release-title">
     <div class="section-heading">
       <p class="eyebrow">Official release</p>
-      <h2 id="release-title">CrossInk Academic v1.5.2</h2>
+      <h2 id="release-title">CrossInk Academic v1.6.1</h2>
     </div>
     <p>
-      The current release preserves the fork's ClippingStore v4 format and document identity while adding compatible academic notes, highlights, user-defined tags, and Project Gutenberg as a bundled OPDS catalog.
+      The current release keeps the fork's ClippingStore v4 format and document identity while providing academic notes, highlights, clippings, bookmarks, user-defined tags, X4 Pro compatibility, and Project Gutenberg as a bundled OPDS catalog across every device build.
     </p>
     <div class="hero-actions">
-      <a class="button primary" href="https://github.com/jbfarias/CrossInk-academic/releases/download/v1.5.2/firmware-x3-x4-v1.5.2.bin">Firmware X3/X4</a>
-      <a class="button" href="https://github.com/jbfarias/CrossInk-academic/releases/download/v1.5.2/firmware-x3-x4-debug-v1.5.2.bin">Firmware X3/X4 (logger)</a>
-      <a class="button" href="https://github.com/jbfarias/CrossInk-academic/releases/tag/v1.5.2">Release notes</a>
+      <a class="button primary" href="https://github.com/jbfarias/CrossInk-academic/releases/download/v1.6.1/firmware-x3-x4-v1.6.1.bin">Firmware X3/X4</a>
+      <a class="button" href="https://github.com/jbfarias/CrossInk-academic/releases/download/v1.6.1/firmware-x4-pro-v1.6.1.bin">Firmware X4 Pro</a>
+      <a class="button" href="https://github.com/jbfarias/CrossInk-academic/releases/download/v1.6.1/firmware-sticky-v1.6.1.bin">Firmware Sticky</a>
+      <a class="button" href="https://github.com/jbfarias/CrossInk-academic/releases/tag/v1.6.1">Release notes</a>
     </div>
     <div class="intro-grid">
       <div>
@@ -57,7 +58,7 @@ const featuredDocs = docs.filter((doc) =>
       </div>
       <div>
         <span>Diagnostics</span>
-        <strong>The logger build enables detailed serial logs and writes a crash report to the SD card after a panic.</strong>
+        <strong>X3/X4, X4 Pro, and Sticky builds share the academic notes, highlights, clippings, bookmarks, and tag stores.</strong>
       </div>
     </div>
   </section>

@@ -2,19 +2,49 @@
   "schema_version": 1,
   "releases": [
     {
-      "id": "stable-1.5.2-x3-x4",
+      "id": "stable-1.6.1-x3-x4",
       "channel": "stable",
-      "name": "1.5.2",
-      "version": "1.5.2",
+      "name": "1.6.1",
+      "version": "1.6.1",
       "variant": "x3-x4",
-      "released_at": "2026-08-16T16:41:48Z",
-      "notes": "CrossInk Academic v1.5.2 stable X3/X4 firmware",
-      "firmware_url": "https://github.com/jbfarias/CrossInk-academic/releases/download/v1.5.2/firmware-x3-x4-v1.5.2.bin",
-      "firmware_sha256": "072d1809a1d249396c626117c7b22c8df6d176a7153d8977ad71118dc7762eca",
-      "size": 6272848,
+      "released_at": "2026-08-22T00:00:00Z",
+      "notes": "CrossInk Academic v1.6.1 stable X3/X4 firmware with academic annotations",
+      "firmware_url": "https://github.com/jbfarias/CrossInk-academic/releases/download/v1.6.1/firmware-x3-x4-v1.6.1.bin",
+      "firmware_sha256": "eb85badbeb02b993ae7c0f658dd781c03a1768c84a44b5f37dae64b71a764d8f",
+      "size": 6278368,
       "supported_devices": [
         "x4",
         "x3"
+      ]
+    },
+    {
+      "id": "stable-1.6.1-x4-pro",
+      "channel": "stable",
+      "name": "1.6.1",
+      "version": "1.6.1",
+      "variant": "x4-pro",
+      "released_at": "2026-08-22T00:00:00Z",
+      "notes": "CrossInk Academic v1.6.1 stable X4 Pro firmware with touch and academic annotations",
+      "firmware_url": "https://github.com/jbfarias/CrossInk-academic/releases/download/v1.6.1/firmware-x4-pro-v1.6.1.bin",
+      "firmware_sha256": "7e8eb8c1815fea737435bc341324dab906bae08339b3dfe3382766baa8452f0b",
+      "size": 6170720,
+      "supported_devices": [
+        "x4-pro"
+      ]
+    },
+    {
+      "id": "stable-1.6.1-sticky",
+      "channel": "stable",
+      "name": "1.6.1",
+      "version": "1.6.1",
+      "variant": "sticky",
+      "released_at": "2026-08-22T00:00:00Z",
+      "notes": "CrossInk Academic v1.6.1 stable Sticky firmware with academic annotations",
+      "firmware_url": "https://github.com/jbfarias/CrossInk-academic/releases/download/v1.6.1/firmware-sticky-v1.6.1.bin",
+      "firmware_sha256": "b5a44cca34abd42ea2df81427e697e78535c922c3a9b298d0c889387ece83845",
+      "size": 6074736,
+      "supported_devices": [
+        "sticky"
       ]
     }
   ]
