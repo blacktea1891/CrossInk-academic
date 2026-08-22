@@ -740,7 +740,8 @@ void ParsedText::setRubyGroupAt(size_t startIndex, size_t count, const std::stri
     rubyTexts[idx] = "";
     wordStyles[idx] =
         static_cast<EpdFontFamily::Style>(static_cast<uint8_t>(wordStyles[idx]) | EpdFontFamily::RUBY_CONTINUE);
-    wordContinues[idx] = true;  // Prevent page breaker from splitting the Group Ruby!
+    wordContinues[idx] = true;       // Prevent page breaker from splitting the Group Ruby!
+    wordNoSpaceBefore[idx] = false;  // Keep allowsBreak from splitting the ruby group.
   }
 }
 

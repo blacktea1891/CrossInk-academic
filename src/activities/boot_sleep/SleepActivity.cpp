@@ -1,6 +1,7 @@
 #include "SleepActivity.h"
 
 #include <Epub.h>
+#include <FontCacheManager.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
@@ -479,6 +480,14 @@ bool selectRandomSleepImage(SleepImageMode mode, SleepImageSelection& selection,
   return true;
 }
 
+void releaseSdFontCachesForOverlay(const GfxRenderer& renderer) {
+  if (auto* fcm = renderer.getFontCacheManager()) {
+    LOG_DBG("SLP", "Free heap before SD font cache release: %d bytes", ESP.getFreeHeap());
+    fcm->clearCache();
+    LOG_DBG("SLP", "Free heap after font cache clear, before sleep overlay decode: %d bytes", ESP.getFreeHeap());
+  }
+}
+
 }  // namespace
 
 void SleepActivity::onEnter() {
@@ -530,6 +539,7 @@ void SleepActivity::onEnter() {
         return renderCustomSleepScreen();
       }
     case (CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY):
+      releaseSdFontCachesForOverlay(renderer);
       return renderOverlaySleepScreen();
     case (CrossPointSettings::SLEEP_SCREEN_MODE::READING_STATS_SLEEP):
       return renderReadingStatsSleepScreen();
@@ -923,7 +933,7 @@ void SleepActivity::renderOverlaySleepScreen() const {
       LOG_DBG("SLP", "BMP overlay not found: %s", filename.c_str());
       return OverlayDrawResult::NotFound;
     }
-    Bitmap bitmap(file, true);
+    Bitmap bitmap(file);
     const BmpReaderError parseResult = bitmap.parseHeaders();
     if (parseResult != BmpReaderError::Ok) {
       LOG_ERR("SLP", "BMP overlay header parse failed for %s: %s", filename.c_str(),

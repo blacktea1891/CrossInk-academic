@@ -1,3 +1,12 @@
+## [v1.6.1] - 2026-08-22
+
+### Changed
+
+- Promoted the CrossInk Academic notes, highlights, clippings, and annotation-tag improvements to the X3/X4, Sticky, and X4 Pro builds.
+- Updated the product name to CrossInk Academic across device names, translations, startup identity, and the X4 Pro USB descriptor.
+- Kept the X4 Pro firmware and simulator on the same academic feature set as the X3/X4 and Sticky builds.
+- Ported compatible RC2 robustness fixes for EPUB ruby groups, trailing markup, and low-memory transparent sleep overlays.
+
 ## [v1.5.2] - 2026-08-16
 
 ### Added

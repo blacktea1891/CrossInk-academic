@@ -3098,6 +3098,10 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
     return;
   }
 
+  if (strcmp(name, "html") == 0) {
+    self->htmlEnded_ = true;
+  }
+
   if (self->skipEndElementStateUntilDepth < self->depth) {
     self->depth -= 1;
     if (self->skipUntilDepth == self->depth) {
@@ -3473,6 +3477,7 @@ void ChapterHtmlSlimParser::releaseInputFile() {
 
 bool ChapterHtmlSlimParser::beginParse() {
   malformedMarkupTruncated = false;
+  htmlEnded_ = false;
   parseFileOffset_ = 0;
   parseFileSize_ = 0;
   // Runs before the render pass opens the file, so only one reader is ever open at a time.
@@ -3586,6 +3591,10 @@ ChapterHtmlSlimParser::ParseStatus ChapterHtmlSlimParser::parseStep() {
   const bool done = parseFile_.available() == 0;
   const XML_Status parseStatus = XML_ParseBuffer(activeParser, static_cast<int>(len), done);
   if (parseStatus == XML_STATUS_ERROR && !previewStopRequested) {
+    if (htmlEnded_) {
+      LOG_DBG("EHP", "Ignoring trailing data after </html>: %s", XML_ErrorString(XML_GetErrorCode(activeParser)));
+      return ParseStatus::Done;
+    }
     LOG_ERR("EHP", "Parse error at line %lu:\n%s", XML_GetCurrentLineNumber(activeParser),
             XML_ErrorString(XML_GetErrorCode(activeParser)));
     if (isPreviewBuild()) {

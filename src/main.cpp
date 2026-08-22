@@ -1220,7 +1220,7 @@ void setup() {
   }
 
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
-  LOG_DBG("MAIN", "Starting CrossInk version " CROSSINK_VERSION);
+  LOG_DBG("MAIN", "Starting CrossInk Academic version " CROSSINK_VERSION);
   logMemoryStats("Boot");
 
   // Resolve the single boot-presentation decision. Skipping the splash also
