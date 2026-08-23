@@ -2,7 +2,7 @@
 
 O **CrossInk Academic** é um fork do CrossInk voltado a leitores acadêmicos. O projeto preserva a base do firmware original e incorpora melhorias destinadas à leitura, organização, consulta e estudo de textos acadêmicos em dispositivos de tinta eletrônica.
 
-**Versão atual: v1.6.1 (22 de agosto de 2026).**
+**Versão atual: v1.7.0-rc (23 de agosto de 2026).**
 
 Este é um projeto independente e não oficial. Os créditos pelo firmware original pertencem aos desenvolvedores e colaboradores do CrossInk.
 
@@ -64,7 +64,7 @@ My goal with this fork was to maintain the core Crosspoint firmware while integr
 - Academic notes and highlights with document-safe migrations, compatible with the fork's ClippingStore v4.
 - User-defined annotation tags for clippings and current pages, with tag-aware exports.
 - Web **Highlights** page for searching, editing, tagging, and exporting EPUB notes through `/highlights`.
-- The academic notes, highlights, clippings, bookmarks, and annotation tags are included in every v1.6.1 device build.
+- The academic notes, highlights, clippings, bookmarks, and annotation tags are included in every v1.7.0-rc device build.
 - X4 Pro support includes its ESP32-S3 display profile, touch/Home key, frontlight controls, USB storage, and CrossInk Academic USB identity.
 - EPUB robustness improvements for ruby groups, trailing markup after `</html>`, and transparent sleep overlays.
 - Project Gutenberg bundled as an official OPDS catalog; additional OPDS libraries can still be added manually.
@@ -134,13 +134,13 @@ The fastest way to install Crossink is by using Inky, Crossink's web companion a
 
 Download a `firmware-*.bin` from the [CrossInk Academic releases page](https://github.com/jbfarias/CrossInk-academic/releases), then flash it with the web installer or command line.
 
-For **v1.6.1**, choose the firmware for your device:
+For **v1.7.0-rc**, choose the firmware for your device:
 
-- [X3/X4 firmware](https://github.com/jbfarias/CrossInk-academic/releases/download/v1.6.1/firmware-x3-x4-v1.6.1.bin)
-- [X4 Pro firmware](https://github.com/jbfarias/CrossInk-academic/releases/download/v1.6.1/firmware-x4-pro-v1.6.1.bin)
-- [Sticky firmware](https://github.com/jbfarias/CrossInk-academic/releases/download/v1.6.1/firmware-sticky-v1.6.1.bin)
+- [X3/X4 firmware](https://github.com/jbfarias/CrossInk-academic/releases/download/v1.7.0-rc/firmware-x3-x4-v1.7.0-rc.bin)
+- [X4 Pro firmware](https://github.com/jbfarias/CrossInk-academic/releases/download/v1.7.0-rc/firmware-x4-pro-v1.7.0-rc.bin)
+- [Sticky firmware](https://github.com/jbfarias/CrossInk-academic/releases/download/v1.7.0-rc/firmware-sticky-v1.7.0-rc.bin)
 
-All three builds include the academic annotation features. Verify the SHA-256 values and follow the device-specific instructions in the [v1.6.1 release notes](https://github.com/jbfarias/CrossInk-academic/releases/tag/v1.6.1) before flashing.
+All three builds include the academic annotation features. This is a release candidate; verify the SHA-256 values and follow the device-specific instructions in the [v1.7.0-rc release notes](https://github.com/jbfarias/CrossInk-academic/releases/tag/v1.7.0-rc) before flashing.
 
 See [Installation](./docs/installation.md) for step-by-step flashing and revert instructions.
 

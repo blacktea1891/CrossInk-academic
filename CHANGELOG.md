@@ -1,3 +1,21 @@
+## [v1.7.0-rc] - 2026-08-23
+
+### Added
+
+- Added a physical X4 Pro validation matrix covering display orientation,
+  frontlight, touch, Home key, USB Drive, battery, sleep/wake, annotations,
+  and large EPUB safety checks.
+- Added host tests for the EPUB memory-budget gates, including fragmented heap
+  handling, image-decoder budgets, SD-font release decisions, and optional
+  background rebuilds.
+
+### Changed
+
+- Documented that simulator coverage complements but does not replace physical
+  X4 Pro validation.
+- Kept the BookOrbit integration out of the firmware core for this release
+  candidate; it remains a future optional synchronization layer.
+
 ## [v1.6.1] - 2026-08-22
 
 ### Changed

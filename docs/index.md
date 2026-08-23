@@ -26,3 +26,4 @@ Welcome to CrossInk Academic, a research-oriented fork of CrossPoint Reader.
 - [Data Cache](./data-cache.md)
 - [Web Server Guide](./webserver.md)
 - [Troubleshooting](./troubleshooting.md)
+- [X4 Pro Validation](./x4-pro-validation.md)
