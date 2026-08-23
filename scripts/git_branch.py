@@ -145,6 +145,21 @@ def inject_version(env):
             print(f'CrossInk build version: {version_string}')
         env.Append(CPPDEFINES=[('CROSSINK_VERSION', f'\\"{version_string}\\"')])
 
+    elif pioenv in ('sticky', 'x4-pro'):
+        # Keep the device suffix for local builds, but make release builds use
+        # the exact version supplied by CROSSINK_RELEASE_VERSION.  These
+        # environments used to define CROSSINK_VERSION directly in
+        # platformio.ini, which made their release binaries report a stale
+        # variant version (for example 1.7.0-x4-pro instead of 1.7.0-rc).
+        device_suffix = f'-{pioenv}'
+        if os.environ.get('CROSSINK_RELEASE_VERSION'):
+            version_string = get_production_version(project_dir)
+            print(f'CrossInk production build version: {version_string}')
+        else:
+            version_string = f'{get_crossink_version(project_dir)}{device_suffix}'
+            print(f'CrossInk {pioenv} build version: {version_string}')
+        env.Append(CPPDEFINES=[('CROSSINK_VERSION', f'\\"{version_string}\\"')])
+
     elif pioenv == 'debug':
         branch = get_git_branch(project_dir)
         short_hash = get_git_short_hash(project_dir)

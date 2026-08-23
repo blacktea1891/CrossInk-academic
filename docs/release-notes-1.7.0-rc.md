@@ -7,8 +7,8 @@ Release candidate dated 23 August 2026.
 | Device | File | SHA-256 |
 | --- | --- | --- |
 | X3 / X4 | `firmware-x3-x4-v1.7.0-rc.bin` | `d5c74d70ed67812eafd06228f8610eabef2a8c05e189d85b2d1f5faeeeb249ae` |
-| X4 Pro | `firmware-x4-pro-v1.7.0-rc.bin` | `83a2ff2e44a73fe0bd91d79fe82dbd81e2a57044e1eb69a8bc81244a41ae073a` |
-| Sticky | `firmware-sticky-v1.7.0-rc.bin` | `3d8cf45831622a16f3b21cca2e4f6d03d9a77bd1727bba1ef1e85fc5e46727cb` |
+| X4 Pro | `firmware-x4-pro-v1.7.0-rc.bin` | `a1e349a5e23fdef8ca19218ad29fad1d9d96a67f13ca1c99bdfa56dce76f7fce` |
+| Sticky | `firmware-sticky-v1.7.0-rc.bin` | `7ec75e849d057120ce5190df53ee819c2f2652e300acdff730315665d5373ec2` |
 
 ## What changed
 
@@ -21,6 +21,7 @@ Release candidate dated 23 August 2026.
 ## Validation
 
 - X3/X4, Sticky, and X4 Pro firmware builds completed successfully with OTA-size checks.
+- The release binaries embed the same `1.7.0-rc` version string across all three device profiles.
 - X4 Pro simulator smoke test passed with touch page turns, frontlight controls, Home, touch-disabled mode, and menu navigation.
 - X3/X4 simulator smoke test passed with three page turns.
 - Memory-budget test suite passed 5/5 tests.
