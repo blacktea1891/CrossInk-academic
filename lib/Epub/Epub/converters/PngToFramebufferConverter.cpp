@@ -501,7 +501,7 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   const uint32_t profileProcessMs = profileDrawMs > profileCacheAdvanceMs ? profileDrawMs - profileCacheAdvanceMs : 0;
   const uint32_t profilePxcIoMs = profileCacheAdvanceMs + profileFinalizeMs;
 
-  LOG_DBG(
+  LOG_INF(
       "PNG",
       "[IMGPROF] PNG %dx%d -> %dx%d open=%lums setup=%lums decode=%lums draw=%lums gray=%lums process=%lums "
       "cache_advance=%lums finalize=%lums pxc_io=%lums total=%lums callbacks=%lu rows=%lu cache=%s",
