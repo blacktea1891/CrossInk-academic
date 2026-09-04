@@ -39,6 +39,14 @@ struct PngContext {
 
   uint8_t* grayLineBuffer{nullptr};
   uint32_t lastYieldMs{0};
+
+  // Low-overhead profiling. Timers are sampled per callback/output row rather
+  // than per pixel so the profiler does not become the bottleneck it measures.
+  uint64_t profileCallbackUs{0};
+  uint64_t profileGrayUs{0};
+  uint64_t profileCacheAdvanceUs{0};
+  uint32_t profileCallbacks{0};
+  uint32_t profileRows{0};
 };
 
 // File I/O callbacks use pFile->fHandle to access the FsFile*,
@@ -209,6 +217,9 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   PngContext* ctx = reinterpret_cast<PngContext*>(pDraw->pUser);
   if (!ctx || !ctx->config || !ctx->renderer || !ctx->grayLineBuffer) return 0;
 
+  const uint32_t callbackStartUs = micros();
+  ctx->profileCallbacks++;
+
   ImageToFramebufferDecoder::yieldDuringDecode(ctx->lastYieldMs);
 
   int srcY = pDraw->y;
@@ -226,12 +237,17 @@ int pngDrawCallback(PNGDRAW* pDraw) {
   }
 
   if (firstDstY <= ctx->lastDstY) firstDstY = ctx->lastDstY + 1;
-  if (firstDstY >= endDstY || firstDstY >= ctx->dstHeight) return 1;
+  if (firstDstY >= endDstY || firstDstY >= ctx->dstHeight) {
+    ctx->profileCallbackUs += static_cast<uint32_t>(micros() - callbackStartUs);
+    return 1;
+  }
   if (endDstY > ctx->dstHeight) endDstY = ctx->dstHeight;
 
   // Convert entire source line to grayscale (improves cache locality)
+  const uint32_t grayStartUs = micros();
   convertLineToGray(pDraw->pPixels, ctx->grayLineBuffer, srcWidth, pDraw->iPixelType, pDraw->iBpp, pDraw->pPalette,
                     pDraw->iHasAlpha);
+  ctx->profileGrayUs += static_cast<uint32_t>(micros() - grayStartUs);
 
   // Render scaled rows using Bresenham-style integer stepping (no floating-point division)
   int dstWidth = ctx->dstWidth;
@@ -248,6 +264,7 @@ int pngDrawCallback(PNGDRAW* pDraw) {
     int outY = ctx->config->y + dstY;
     if (outY >= ctx->screenHeight) continue;
 
+    ctx->profileRows++;
     pw.beginRow(outY);
 
     // The cache streams to disk one row at a time. Flushing rows below this one
@@ -257,7 +274,10 @@ int pngDrawCallback(PNGDRAW* pDraw) {
     bool caching = ctx->caching;
     DirectCacheWriter cw;
     if (caching) {
-      if (!ctx->cache.advanceTo(dstY)) {
+      const uint32_t cacheStartUs = micros();
+      const bool cacheAdvanced = ctx->cache.advanceTo(dstY);
+      ctx->profileCacheAdvanceUs += static_cast<uint32_t>(micros() - cacheStartUs);
+      if (!cacheAdvanced) {
         caching = false;
         ctx->caching = false;
       } else {
@@ -294,6 +314,7 @@ int pngDrawCallback(PNGDRAW* pDraw) {
     }
   }
 
+  ctx->profileCallbackUs += static_cast<uint32_t>(micros() - callbackStartUs);
   return 1;
 }
 
@@ -329,6 +350,8 @@ bool PngToFramebufferConverter::getDimensionsStatic(const std::string& imagePath
 
 bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer,
                                                     const RenderConfig& config) {
+  const uint32_t profileTotalStartMs = millis();
+
   if (!MemoryBudget::hasHeapForImageDecoder("PNG", "PNG", PNG_DECODER_APPROX_SIZE)) {
     return false;
   }
@@ -346,13 +369,17 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   ctx.screenWidth = renderer.getScreenWidth();
   ctx.screenHeight = renderer.getScreenHeight();
 
+  const uint32_t profileOpenStartMs = millis();
   int rc = png->open(imagePath.c_str(), pngOpenWithHandle, pngCloseWithHandle, pngReadWithHandle, pngSeekWithHandle,
                      pngDrawCallback);
+  const uint32_t profileOpenMs = millis() - profileOpenStartMs;
   if (rc != PNG_SUCCESS) {
     LOG_ERR("PNG", "Failed to open PNG: %d", rc);
     delete png;
     return false;
   }
+
+  const uint32_t profileSetupStartMs = millis();
 
   if (!validateImageDimensions(png->getWidth(), png->getHeight(), "PNG")) {
     png->close();
@@ -440,8 +467,11 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
     }
   }
 
+  const uint32_t profileSetupMs = millis() - profileSetupStartMs;
+  const uint32_t profileDecodeStartMs = millis();
   ctx.lastYieldMs = millis();
   rc = png->decode(&ctx, 0);
+  const uint32_t profileDecodeMs = millis() - profileDecodeStartMs;
 
   ctx.grayLineBuffer = nullptr;
 
@@ -457,9 +487,31 @@ bool PngToFramebufferConverter::decodeToFramebuffer(const std::string& imagePath
   delete png;
 
   // Finalize the streamed cache (caching may have been cleared on a flush error).
+  const bool cacheCompleted = ctx.caching;
+  const uint32_t profileFinalizeStartMs = millis();
   if (ctx.caching) {
     ctx.cache.finalize();
   }
+  const uint32_t profileFinalizeMs = millis() - profileFinalizeStartMs;
+
+  const uint32_t profileTotalMs = millis() - profileTotalStartMs;
+  const uint32_t profileDrawMs = static_cast<uint32_t>(ctx.profileCallbackUs / 1000ULL);
+  const uint32_t profileGrayMs = static_cast<uint32_t>(ctx.profileGrayUs / 1000ULL);
+  const uint32_t profileCacheAdvanceMs = static_cast<uint32_t>(ctx.profileCacheAdvanceUs / 1000ULL);
+  const uint32_t profileProcessMs = profileDrawMs > profileCacheAdvanceMs ? profileDrawMs - profileCacheAdvanceMs : 0;
+  const uint32_t profilePxcIoMs = profileCacheAdvanceMs + profileFinalizeMs;
+
+  LOG_DBG(
+      "PNG",
+      "[IMGPROF] PNG %dx%d -> %dx%d open=%lums setup=%lums decode=%lums draw=%lums gray=%lums process=%lums "
+      "cache_advance=%lums finalize=%lums pxc_io=%lums total=%lums callbacks=%lu rows=%lu cache=%s",
+      ctx.srcWidth, ctx.srcHeight, ctx.dstWidth, ctx.dstHeight, static_cast<unsigned long>(profileOpenMs),
+      static_cast<unsigned long>(profileSetupMs), static_cast<unsigned long>(profileDecodeMs),
+      static_cast<unsigned long>(profileDrawMs), static_cast<unsigned long>(profileGrayMs),
+      static_cast<unsigned long>(profileProcessMs), static_cast<unsigned long>(profileCacheAdvanceMs),
+      static_cast<unsigned long>(profileFinalizeMs), static_cast<unsigned long>(profilePxcIoMs),
+      static_cast<unsigned long>(profileTotalMs), static_cast<unsigned long>(ctx.profileCallbacks),
+      static_cast<unsigned long>(ctx.profileRows), cacheCompleted ? "yes" : "no");
 
   return true;
 }
