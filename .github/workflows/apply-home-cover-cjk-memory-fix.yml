@@ -27,22 +27,17 @@ jobs:
           path = Path("lib/Epub/Epub.cpp")
           text = path.read_text(encoding="utf-8")
 
-          old = '''void releaseReaderSdFontCachesBeforeCoverDecode(const GfxRenderer* renderer, const int readerFontId,
-                                                const char* reason) {
-            if (!renderer) return;
-            if (readerFontId <= 0) return;
-            if (!renderer->isSdCardFont(readerFontId)) return;
+          marker = "clear every registered SD font cache before the image decoder's peak"
+          if marker in text:
+              print("Home cover CJK memory fix already present")
+              raise SystemExit(0)
 
-            const auto before = MemoryBudget::snapshot();
-            if (!MemoryBudget::shouldReleaseSdFontCachesForEpubInlineImage(before)) return;
-
-            if (!renderer->releaseSdCardFontForLowMemory(readerFontId)) return;
-
-            const auto after = MemoryBudget::snapshot();
-            LOG_DBG("EBP", "Released SD font caches before %s: free=%u->%u maxAlloc=%u->%u", reason, before.freeHeap,
-                    after.freeHeap, before.maxAllocHeap, after.maxAllocHeap);
-          }
-          '''
+          start_marker = "void releaseReaderSdFontCachesBeforeCoverDecode("
+          end_marker = "std::string getThumbBmpPathForDimensions("
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0 or end <= start:
+              raise SystemExit("Could not locate cover-decode helper boundaries")
 
           new = '''void releaseReaderSdFontCachesBeforeCoverDecode(const GfxRenderer* renderer, const int readerFontId,
                                                 const char* reason) {
@@ -69,15 +64,10 @@ jobs:
                     after.maxAllocHeap);
             (void)readerFontId;
           }
+
           '''
 
-          if old not in text:
-              if "clear every registered SD font cache before the image decoder's peak" in text:
-                  print("Home cover CJK memory fix already present")
-                  raise SystemExit(0)
-              raise SystemExit("Expected cover-decode helper was not found")
-
-          text = text.replace(old, new, 1)
+          text = text[:start] + new + text[end:]
           path.write_text(text, encoding="utf-8")
           print("Applied Home cover CJK memory fix")
           PY
