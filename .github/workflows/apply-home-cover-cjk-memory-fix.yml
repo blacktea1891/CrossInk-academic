@@ -1,0 +1,97 @@
+name: Apply Home cover CJK memory fix
+
+on:
+  push:
+    branches:
+      - fix/cjk-ui-fallback-prewarm
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Release all SD font caches before cover decode
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("lib/Epub/Epub.cpp")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''void releaseReaderSdFontCachesBeforeCoverDecode(const GfxRenderer* renderer, const int readerFontId,
+                                                const char* reason) {
+            if (!renderer) return;
+            if (readerFontId <= 0) return;
+            if (!renderer->isSdCardFont(readerFontId)) return;
+
+            const auto before = MemoryBudget::snapshot();
+            if (!MemoryBudget::shouldReleaseSdFontCachesForEpubInlineImage(before)) return;
+
+            if (!renderer->releaseSdCardFontForLowMemory(readerFontId)) return;
+
+            const auto after = MemoryBudget::snapshot();
+            LOG_DBG("EBP", "Released SD font caches before %s: free=%u->%u maxAlloc=%u->%u", reason, before.freeHeap,
+                    after.freeHeap, before.maxAllocHeap, after.maxAllocHeap);
+          }
+          '''
+
+          new = '''void releaseReaderSdFontCachesBeforeCoverDecode(const GfxRenderer* renderer, const int readerFontId,
+                                                const char* reason) {
+            if (!renderer) return;
+
+            const auto before = MemoryBudget::snapshot();
+            if (!MemoryBudget::shouldReleaseSdFontCachesForEpubInlineImage(before)) return;
+
+            // CJK UI fallback sizes are independent SD-card font objects. UI rendering can
+            // leave their mini glyph/bitmap arenas resident before Home generates cover
+            // thumbnails. Releasing only the reader font does not recover that heap, so
+            // clear every registered SD font cache before the image decoder's peak.
+            size_t released = 0;
+            for (const auto& entry : renderer->getSdCardFonts()) {
+              if (entry.second != nullptr && renderer->releaseSdCardFontForLowMemory(entry.first)) {
+                ++released;
+              }
+            }
+            if (released == 0) return;
+
+            const auto after = MemoryBudget::snapshot();
+            LOG_DBG("EBP", "Released %u SD font caches before %s: free=%u->%u maxAlloc=%u->%u",
+                    static_cast<unsigned>(released), reason, before.freeHeap, after.freeHeap, before.maxAllocHeap,
+                    after.maxAllocHeap);
+            (void)readerFontId;
+          }
+          '''
+
+          if old not in text:
+              if "clear every registered SD font cache before the image decoder's peak" in text:
+                  print("Home cover CJK memory fix already present")
+                  raise SystemExit(0)
+              raise SystemExit("Expected cover-decode helper was not found")
+
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding="utf-8")
+          print("Applied Home cover CJK memory fix")
+          PY
+
+      - name: Commit patched source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- lib/Epub/Epub.cpp; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/Epub/Epub.cpp
+          git commit -m "fix: free CJK UI font caches before cover decode"
+          git push origin HEAD:${GITHUB_REF_NAME}
