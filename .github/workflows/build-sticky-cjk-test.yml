@@ -45,6 +45,9 @@ jobs:
           path = Path("lib/Epub/Epub/blocks/ImageBlock.cpp")
           text = path.read_text()
 
+          def block(*lines: str) -> str:
+              return "\n".join(lines)
+
           def replace_once(old: str, new: str, label: str) -> None:
               global text
               count = text.count(old)
@@ -53,121 +56,126 @@ jobs:
               text = text.replace(old, new, 1)
 
           replace_once(
-              '#include "ImageBlock.h"\n\n#include <FontCacheManager.h>',
-              '#include "ImageBlock.h"\n\n#include <Arduino.h>\n#include <FontCacheManager.h>',
+              block('#include "ImageBlock.h"', '', '#include <FontCacheManager.h>'),
+              block('#include "ImageBlock.h"', '', '#include <Arduino.h>', '#include <FontCacheManager.h>'),
               "Arduino include",
           )
 
           replace_once(
-              '''  // Try to render from cache first
-          std::string cachePath = getCachePath(imagePath);
-          if (renderFromCache(renderer, cachePath, x, y, width, height)) {
-            return;  // Successfully rendered from cache
-          }
+              block(
+                  '  // Try to render from cache first',
+                  '  std::string cachePath = getCachePath(imagePath);',
+              ),
+              block(
+                  '  const uint32_t pipelineStartMs = millis();',
+                  '  // Try to render from cache first',
+                  '  std::string cachePath = getCachePath(imagePath);',
+                  '  const uint32_t cacheStartMs = millis();',
+              ),
+              "pipeline start",
+          )
 
-          if (!sourcePath.empty() && extractFn && !Storage.exists(imagePath.c_str())) {
-            if (!extractFn(extractContext, sourcePath.c_str(), imagePath.c_str())) {
-              LOG_ERR("IMG", "Lazy extraction failed: %s", sourcePath.c_str());
-            }
-          }
+          replace_once(
+              block(
+                  '  if (renderFromCache(renderer, cachePath, x, y, width, height)) {',
+                  '    return;  // Successfully rendered from cache',
+                  '  }',
+                  '',
+                  '  if (!sourcePath.empty() && extractFn && !Storage.exists(imagePath.c_str())) {',
+                  '    if (!extractFn(extractContext, sourcePath.c_str(), imagePath.c_str())) {',
+                  '      LOG_ERR("IMG", "Lazy extraction failed: %s", sourcePath.c_str());',
+                  '    }',
+                  '  }',
+              ),
+              block(
+                  '  if (renderFromCache(renderer, cachePath, x, y, width, height)) {',
+                  '    return;  // Successfully rendered from cache',
+                  '  }',
+                  '  const uint32_t cacheDoneMs = millis();',
+                  '  LOG_INF("IMG", "[IMGPIPE] cache miss cache_check=%lums path=%s source=%s",',
+                  '          static_cast<unsigned long>(cacheDoneMs - cacheStartMs), imagePath.c_str(), sourcePath.c_str());',
+                  '',
+                  '  const uint32_t existsStartMs = millis();',
+                  '  const bool imageAlreadyExtracted = Storage.exists(imagePath.c_str());',
+                  '  const uint32_t existsDoneMs = millis();',
+                  '  LOG_INF("IMG", "[IMGPIPE] source exists=%d check=%lums elapsed=%lums", imageAlreadyExtracted ? 1 : 0,',
+                  '          static_cast<unsigned long>(existsDoneMs - existsStartMs),',
+                  '          static_cast<unsigned long>(existsDoneMs - pipelineStartMs));',
+                  '',
+                  '  if (!sourcePath.empty() && extractFn && !imageAlreadyExtracted) {',
+                  '    const uint32_t extractStartMs = millis();',
+                  '    LOG_INF("IMG", "[IMGPIPE] extract start source=%s dest=%s", sourcePath.c_str(), imagePath.c_str());',
+                  '    const bool extracted = extractFn(extractContext, sourcePath.c_str(), imagePath.c_str());',
+                  '    const uint32_t extractDoneMs = millis();',
+                  '    LOG_INF("IMG", "[IMGPIPE] extract done ok=%d time=%lums elapsed=%lums", extracted ? 1 : 0,',
+                  '            static_cast<unsigned long>(extractDoneMs - extractStartMs),',
+                  '            static_cast<unsigned long>(extractDoneMs - pipelineStartMs));',
+                  '    if (!extracted) {',
+                  '      LOG_ERR("IMG", "Lazy extraction failed: %s", sourcePath.c_str());',
+                  '    }',
+                  '  }',
+              ),
+              "cache/extraction path",
+          )
 
-          // No cache - need to decode the image
-          // Check if image file exists
-          FsFile file;
-          if (!Storage.openFileForRead("IMG", imagePath, file)) {
-            LOG_ERR("IMG", "Image file not found: %s", imagePath.c_str());
-            rememberImageFailure(imagePath);
-            renderPlaceholder(renderer, x, y, foregroundBlack);
-            return;
-          }
-          size_t fileSize = file.size();
-          file.close();
+          replace_once(
+              block(
+                  '  // Check if image file exists',
+                  '  FsFile file;',
+              ),
+              block(
+                  '  // Check if image file exists',
+                  '  const uint32_t openStartMs = millis();',
+                  '  FsFile file;',
+              ),
+              "source open start",
+          )
 
-          if (fileSize == 0) {
-            LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
-            rememberImageFailure(imagePath);
-            renderPlaceholder(renderer, x, y, foregroundBlack);
-            return;
-          }
-          ''',
-              '''  const uint32_t pipelineStartMs = millis();
-          std::string cachePath = getCachePath(imagePath);
-          const uint32_t cacheStartMs = millis();
-          if (renderFromCache(renderer, cachePath, x, y, width, height)) {
-            return;
-          }
-          const uint32_t cacheDoneMs = millis();
-          LOG_INF("IMG", "[IMGPIPE] cache miss cache_check=%lums path=%s source=%s",
-                  static_cast<unsigned long>(cacheDoneMs - cacheStartMs), imagePath.c_str(), sourcePath.c_str());
-
-          const uint32_t existsStartMs = millis();
-          const bool imageAlreadyExtracted = Storage.exists(imagePath.c_str());
-          const uint32_t existsDoneMs = millis();
-          LOG_INF("IMG", "[IMGPIPE] source exists=%d check=%lums elapsed=%lums", imageAlreadyExtracted ? 1 : 0,
-                  static_cast<unsigned long>(existsDoneMs - existsStartMs),
-                  static_cast<unsigned long>(existsDoneMs - pipelineStartMs));
-
-          if (!sourcePath.empty() && extractFn && !imageAlreadyExtracted) {
-            const uint32_t extractStartMs = millis();
-            LOG_INF("IMG", "[IMGPIPE] extract start source=%s dest=%s", sourcePath.c_str(), imagePath.c_str());
-            const bool extracted = extractFn(extractContext, sourcePath.c_str(), imagePath.c_str());
-            const uint32_t extractDoneMs = millis();
-            LOG_INF("IMG", "[IMGPIPE] extract done ok=%d time=%lums elapsed=%lums", extracted ? 1 : 0,
-                    static_cast<unsigned long>(extractDoneMs - extractStartMs),
-                    static_cast<unsigned long>(extractDoneMs - pipelineStartMs));
-            if (!extracted) {
-              LOG_ERR("IMG", "Lazy extraction failed: %s", sourcePath.c_str());
-            }
-          }
-
-          // No cache - need to decode the image
-          // Check if image file exists
-          const uint32_t openStartMs = millis();
-          FsFile file;
-          if (!Storage.openFileForRead("IMG", imagePath, file)) {
-            LOG_ERR("IMG", "Image file not found: %s", imagePath.c_str());
-            rememberImageFailure(imagePath);
-            renderPlaceholder(renderer, x, y, foregroundBlack);
-            return;
-          }
-          size_t fileSize = file.size();
-          file.close();
-          const uint32_t openDoneMs = millis();
-          LOG_INF("IMG", "[IMGPIPE] source ready bytes=%u open=%lums elapsed=%lums", static_cast<unsigned>(fileSize),
-                  static_cast<unsigned long>(openDoneMs - openStartMs),
-                  static_cast<unsigned long>(openDoneMs - pipelineStartMs));
-
-          if (fileSize == 0) {
-            LOG_ERR("IMG", "Image file is empty: %s", imagePath.c_str());
-            rememberImageFailure(imagePath);
-            renderPlaceholder(renderer, x, y, foregroundBlack);
-            return;
-          }
-          ''',
-              "image extraction path",
+          replace_once(
+              block(
+                  '  size_t fileSize = file.size();',
+                  '  file.close();',
+                  '',
+                  '  if (fileSize == 0) {',
+              ),
+              block(
+                  '  size_t fileSize = file.size();',
+                  '  file.close();',
+                  '  const uint32_t openDoneMs = millis();',
+                  '  LOG_INF("IMG", "[IMGPIPE] source ready bytes=%u open=%lums elapsed=%lums", static_cast<unsigned>(fileSize),',
+                  '          static_cast<unsigned long>(openDoneMs - openStartMs),',
+                  '          static_cast<unsigned long>(openDoneMs - pipelineStartMs));',
+                  '',
+                  '  if (fileSize == 0) {',
+              ),
+              "source open done",
           )
 
           replace_once(
               '  ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);',
-              '''  const uint32_t decoderLookupStartMs = millis();
-          ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);
-          const uint32_t decoderLookupDoneMs = millis();
-          LOG_INF("IMG", "[IMGPIPE] decoder lookup found=%d lookup=%lums elapsed=%lums", decoder ? 1 : 0,
-                  static_cast<unsigned long>(decoderLookupDoneMs - decoderLookupStartMs),
-                  static_cast<unsigned long>(decoderLookupDoneMs - pipelineStartMs));''',
+              block(
+                  '  const uint32_t decoderLookupStartMs = millis();',
+                  '  ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(imagePath);',
+                  '  const uint32_t decoderLookupDoneMs = millis();',
+                  '  LOG_INF("IMG", "[IMGPIPE] decoder lookup found=%d lookup=%lums elapsed=%lums", decoder ? 1 : 0,',
+                  '          static_cast<unsigned long>(decoderLookupDoneMs - decoderLookupStartMs),',
+                  '          static_cast<unsigned long>(decoderLookupDoneMs - pipelineStartMs));',
+              ),
               "decoder lookup",
           )
 
           replace_once(
               '  bool success = decoder->decodeToFramebuffer(imagePath, renderer, config);',
-              '''  const uint32_t decodeStartMs = millis();
-          LOG_INF("IMG", "[IMGPIPE] decode start elapsed=%lums",
-                  static_cast<unsigned long>(decodeStartMs - pipelineStartMs));
-          bool success = decoder->decodeToFramebuffer(imagePath, renderer, config);
-          const uint32_t decodeDoneMs = millis();
-          LOG_INF("IMG", "[IMGPIPE] decode done ok=%d time=%lums total=%lums", success ? 1 : 0,
-                  static_cast<unsigned long>(decodeDoneMs - decodeStartMs),
-                  static_cast<unsigned long>(decodeDoneMs - pipelineStartMs));''',
+              block(
+                  '  const uint32_t decodeStartMs = millis();',
+                  '  LOG_INF("IMG", "[IMGPIPE] decode start elapsed=%lums",',
+                  '          static_cast<unsigned long>(decodeStartMs - pipelineStartMs));',
+                  '  bool success = decoder->decodeToFramebuffer(imagePath, renderer, config);',
+                  '  const uint32_t decodeDoneMs = millis();',
+                  '  LOG_INF("IMG", "[IMGPIPE] decode done ok=%d time=%lums total=%lums", success ? 1 : 0,',
+                  '          static_cast<unsigned long>(decodeDoneMs - decodeStartMs),',
+                  '          static_cast<unsigned long>(decodeDoneMs - pipelineStartMs));',
+              ),
               "decoder call",
           )
 
