@@ -119,6 +119,9 @@ cpp_path.write_text(cpp)
 # ImageBlock: on an EPUB PNG cache miss, allocate one exact-size PSRAM buffer,
 # stream the ZIP entry into it, decode synchronously, then release it. If any
 # step fails, execution falls through to the existing SD extraction/file path.
+# Only fully-on-screen images use this experiment because the existing reader
+# only creates a persistent PXC for those images; without that cache a partial
+# image would be re-inflated from the EPUB on each grayscale render pass.
 # The allocation is transient and runtime-sized, so stack/static storage is not
 # suitable; PSRAM keeps the multi-megabyte compressed source out of internal DRAM.
 # ---------------------------------------------------------------------------
@@ -213,7 +216,7 @@ image = replace_once(
 )
 
 ram_fast_path = block(
-    '  if (!imageAlreadyExtracted && !sourcePath.empty() && extractContext && psramHeapAvailable() &&',
+    '  if (fullyOnScreen && !imageAlreadyExtracted && !sourcePath.empty() && extractContext && psramHeapAvailable() &&',
     '      PngToFramebufferConverter::supportsFormat(imagePath)) {',
     '    const uint32_t ramPathStartMs = millis();',
     '    size_t sourceSize = 0;',
@@ -242,7 +245,7 @@ ram_fast_path = block(
     '          ramConfig.useDithering = true;',
     '          ramConfig.performanceMode = false;',
     '          ramConfig.useExactDimensions = true;',
-    '          if (fullyOnScreen) ramConfig.cachePath = cachePath;',
+    '          ramConfig.cachePath = cachePath;',
     '',
     '          PngToFramebufferConverter ramDecoder;',
     '          const uint32_t ramDecodeStartMs = millis();',
