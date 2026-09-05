@@ -40,17 +40,17 @@ jobs:
       - name: Build Sticky firmware
         run: |
           set -euo pipefail
-          pio run -j1 -e sticky | tee pio-sticky.log
-          test -f .pio/build/sticky/firmware-sticky.bin
-          sha256sum .pio/build/sticky/firmware-sticky.bin | tee SHA256SUMS
-          ls -lh .pio/build/sticky/firmware-sticky.bin
+          pio run -j1 -e sticky-debug | tee pio-sticky.log
+          test -f .pio/build/sticky-debug/firmware-sticky.bin
+          sha256sum .pio/build/sticky-debug/firmware-sticky.bin | tee SHA256SUMS
+          ls -lh .pio/build/sticky-debug/firmware-sticky.bin
 
       - name: Upload Sticky test firmware
         uses: actions/upload-artifact@v7
         with:
           name: crossink-academic-sticky-cjk-test
           path: |
-            .pio/build/sticky/firmware-sticky.bin
+            .pio/build/sticky-debug/firmware-sticky.bin
             SHA256SUMS
             pio-sticky.log
           if-no-files-found: error
