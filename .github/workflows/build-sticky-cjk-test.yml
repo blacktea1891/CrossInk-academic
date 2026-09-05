@@ -1,0 +1,63 @@
+name: Build Sticky CJK test firmware
+
+on:
+  push:
+    branches:
+      - fix/cjk-ui-fallback-prewarm
+
+permissions:
+  contents: read
+
+jobs:
+  build-sticky:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: ${{ runner.os }}-platformio-py3.14-core6.1.19-sticky-${{ hashFiles('platformio.ini', 'platformio.local.example.ini') }}
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      - name: Inject image latency profiler
+        run: python .github/scripts/inject_sticky_image_profiler.py
+
+      - name: Inject Sticky PNG PSRAM reader fast path
+        run: python .github/scripts/inject_sticky_png_psram_fastpath.py
+
+      - name: Build Sticky firmware
+        run: |
+          set -euo pipefail
+          pio run -j1 -e sticky-debug | tee pio-sticky.log
+          test -f .pio/build/sticky-debug/firmware-sticky.bin
+          sha256sum .pio/build/sticky-debug/firmware-sticky.bin | tee SHA256SUMS
+          ls -lh .pio/build/sticky-debug/firmware-sticky.bin
+
+      - name: Upload Sticky test firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: crossink-academic-sticky-cjk-test
+          path: |
+            .pio/build/sticky-debug/firmware-sticky.bin
+            SHA256SUMS
+            pio-sticky.log
+          if-no-files-found: error
+          retention-days: 7
