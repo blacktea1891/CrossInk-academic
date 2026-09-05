@@ -228,7 +228,7 @@ ram_fast_path = block(
     '                static_cast<unsigned long>(sourceSize));',
     '        FixedBufferPrint ramSink(sourceBuffer.get(), sourceSize);',
     '        const uint32_t streamStartMs = millis();',
-    '        const bool streamed = extractContext->readItemContentsToStream(sourcePath, ramSink, 4096);',
+    '        const bool streamed = extractContext->readItemContentsToStream(sourcePath, ramSink, 16384);',
     '        const uint32_t streamMs = millis() - streamStartMs;',
     '        const bool complete = streamed && ramSink.bytesWritten() == sourceSize;',
     '        LOG_INF("IMG", "[IMGPROF] EPUB PNG RAM stream ok=%d bytes=%lu/%lu time=%lums", complete ? 1 : 0,',
