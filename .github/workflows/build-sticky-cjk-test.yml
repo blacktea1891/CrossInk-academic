@@ -43,6 +43,66 @@ jobs:
       - name: Inject Sticky PNG PSRAM reader fast path
         run: python .github/scripts/inject_sticky_png_psram_fastpath.py
 
+      - name: Inject temporary dedicated SPI bulk-read mode
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          header_path = Path("freeink-sdk/libs/hardware/SDCardManager/include/SDCardManager.h")
+          header = header_path.read_text()
+          header = replace_once(
+              header,
+              "  SDCardManager();\n  bool begin();\n  bool ready() const;\n",
+              "  SDCardManager();\n"
+              "  bool begin();\n"
+              "  bool ready() const;\n"
+              "  // Sticky experiment: temporarily allow SdFat multi-block dedicated-SPI mode\n"
+              "  // while the display is idle, then restore shared mode before any EPD traffic.\n"
+              "  bool setDedicatedSpiForBulkRead(bool enabled) {\n"
+              "#if FREEINK_SD_SDMMC\n"
+              "    (void)enabled;\n"
+              "    return false;\n"
+              "#else\n"
+              "    return sd.setDedicatedSpi(enabled);\n"
+              "#endif\n"
+              "  }\n",
+              "SDCardManager temporary dedicated SPI hook",
+          )
+          header_path.write_text(header)
+
+          image_path = Path("lib/Epub/Epub/blocks/ImageBlock.cpp")
+          image = image_path.read_text()
+          image = replace_once(
+              image,
+              '#include "Epub/converters/PngToFramebufferConverter.h"\n',
+              '#include "Epub/converters/PngToFramebufferConverter.h"\n#include <SDCardManager.h>\n',
+              "ImageBlock SD manager include",
+          )
+          image = replace_once(
+              image,
+              "        const uint32_t streamStartMs = millis();\n"
+              "        const bool streamed = extractContext->readItemContentsToStream(sourcePath, ramSink, 16384);\n"
+              "        const uint32_t streamMs = millis() - streamStartMs;\n"
+              "        const bool complete = streamed && ramSink.bytesWritten() == sourceSize;\n",
+              "        const bool dedicatedSpi = SdMan.setDedicatedSpiForBulkRead(true);\n"
+              "        LOG_INF(\"IMG\", \"[IMGPROF] SD SPI dedicated enter=%d\", dedicatedSpi ? 1 : 0);\n"
+              "        const uint32_t streamStartMs = millis();\n"
+              "        const bool streamed = extractContext->readItemContentsToStream(sourcePath, ramSink, 16384);\n"
+              "        const uint32_t streamMs = millis() - streamStartMs;\n"
+              "        const bool sharedSpiRestored = !dedicatedSpi || SdMan.setDedicatedSpiForBulkRead(false);\n"
+              "        LOG_INF(\"IMG\", \"[IMGPROF] SD SPI shared restore=%d\", sharedSpiRestored ? 1 : 0);\n"
+              "        const bool complete = streamed && ramSink.bytesWritten() == sourceSize && sharedSpiRestored;\n",
+              "ImageBlock temporary dedicated SPI window",
+          )
+          image_path.write_text(image)
+          PY
+
       - name: Build Sticky firmware
         run: |
           set -euo pipefail
