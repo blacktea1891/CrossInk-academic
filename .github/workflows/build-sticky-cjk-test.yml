@@ -40,6 +40,9 @@ jobs:
       - name: Inject image latency profiler
         run: python .github/scripts/inject_sticky_image_profiler.py
 
+      - name: Inject Sticky PNG PSRAM reader fast path
+        run: python .github/scripts/inject_sticky_png_psram_fastpath.py
+
       - name: Build Sticky firmware
         run: |
           set -euo pipefail
