@@ -57,6 +57,11 @@ jobs:
       - name: Inject fast Sticky Reader-to-Home return cache
         run: python .github/scripts/inject_sticky_home_return_cache.py
 
+      - name: Fix Lyra diagnostic theme-check ordering
+        run: |
+          sed -i 's/if (isCarouselTheme) logLyraDiagPhase(renderer, "before_first_cover_draw");/if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL) logLyraDiagPhase(renderer, "before_first_cover_draw");/' src/activities/home/HomeActivity.cpp
+          sed -i 's/if (isCarouselTheme) logLyraDiagPhase(renderer, "after_first_cover_draw");/if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL) logLyraDiagPhase(renderer, "after_first_cover_draw");/' src/activities/home/HomeActivity.cpp
+
       - name: Inject temporary dedicated SPI bulk-read mode
         run: |
           python - <<'PY'
