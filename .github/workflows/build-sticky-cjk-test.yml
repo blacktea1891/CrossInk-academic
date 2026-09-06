@@ -44,7 +44,9 @@ jobs:
         run: python .github/scripts/inject_sticky_png_psram_fastpath.py
 
       - name: Inject Sticky Home PNG PSRAM fast path
-        run: python .github/scripts/inject_sticky_home_png_psram_fastpath.py
+        run: |
+          sed -i '/^#include <Arduino.h>$/d' lib/Epub/Epub.cpp
+          python .github/scripts/inject_sticky_home_png_psram_fastpath.py
 
       - name: Inject temporary dedicated SPI bulk-read mode
         run: |
