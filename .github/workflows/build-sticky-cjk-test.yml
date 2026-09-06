@@ -62,6 +62,39 @@ jobs:
           sed -i 's/if (isCarouselTheme) logLyraDiagPhase(renderer, "before_first_cover_draw");/if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL) logLyraDiagPhase(renderer, "before_first_cover_draw");/' src/activities/home/HomeActivity.cpp
           sed -i 's/if (isCarouselTheme) logLyraDiagPhase(renderer, "after_first_cover_draw");/if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL) logLyraDiagPhase(renderer, "after_first_cover_draw");/' src/activities/home/HomeActivity.cpp
 
+      - name: Defer Lyra carousel cleanup until onExit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/activities/home/HomeActivity.cpp")
+          text = path.read_text()
+          old = '''void HomeActivity::onSelectBook(const std::string& path) {
+            gCarouselCache.invalidate();
+            freeCarouselFrames();
+            if (Storage.exists(CAROUSEL_CACHE_TMP_PATH)) {
+              Storage.remove(CAROUSEL_CACHE_TMP_PATH);
+            }
+            activityManager.goToReader(path);
+          }'''
+          new = '''void HomeActivity::onSelectBook(const std::string& path) {
+            // Do not invalidate the static carousel cache here. Home::loop() runs on
+            // the main task while renderCarouselFrame() runs on the render task; an
+            // immediate free/null here can race the render task between its pointer
+            // check and the 48 KB framebuffer memcpy. onExit() already performs the
+            // same cleanup after ActivityManager acquires RenderLock.
+            LOG_INF("HOME", "[LYRADIAG] onSelectBook defer carousel cleanup until onExit");
+            if (Storage.exists(CAROUSEL_CACHE_TMP_PATH)) {
+              Storage.remove(CAROUSEL_CACHE_TMP_PATH);
+            }
+            activityManager.goToReader(path);
+          }'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"onSelectBook cleanup race patch: expected exactly one match, found {count}")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Inject temporary dedicated SPI bulk-read mode
         run: |
           python - <<'PY'
