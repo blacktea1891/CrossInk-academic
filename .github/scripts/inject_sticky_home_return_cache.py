@@ -12,139 +12,113 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-# Sticky-only diagnostic after the first Reader->Home cache experiment exposed an
-# intermittent ipc1 stack-canary panic. Keep the safe part of that experiment
-# (exclude reading progress/stat contents from the full-frame key), but do NOT
-# inject the dynamic footer redraw. Instead log the static key/header and the
-# recent-book order so we can distinguish dynamic-stat invalidation from the
-# Reader's intentional recent-book promotion.
+# Sticky-only Run #27 experiment.
+#
+# Sticky intentionally keeps only one full carousel framebuffer in internal RAM.
+# The old path treated that 1/1 RAM allocation as a "full" cache and then
+# synchronously rendered every remaining book into a three-frame SD snapshot.
+# That is the ~4.5s `built SD cache for 3 book(s)` pause seen on every
+# Reader->Home cache miss.
+#
+# Keep only the currently-visible center frame synchronous. If the user later
+# moves the carousel to another center book, recycle the same RAM slot and
+# render that frame on demand. Do not reintroduce the unstable dynamic-footer
+# overlay from Run #25.
 
 home_path = Path("src/activities/home/HomeActivity.cpp")
 home = home_path.read_text()
 
+# Force the experiment to start from a cache miss rather than accidentally
+# accepting a full-frame snapshot produced by an older test build.
 home = replace_once(
     home,
     'constexpr uint16_t CAROUSEL_CACHE_VERSION = 5;',
-    'constexpr uint16_t CAROUSEL_CACHE_VERSION = 7;',
+    'constexpr uint16_t CAROUSEL_CACHE_VERSION = 8;',
     "carousel cache version bump",
 )
 
-old_dynamic_cover_key = block(
-    '  const std::string cachePath = getRecentBookCachePath(book);',
-    '  if (!cachePath.empty()) {',
-    '    appendHashedFileStateToKey(key, cachePath + "/progress.bin");',
-    '    if (FsHelpers::hasEpubExtension(book.path) || FsHelpers::hasXtcExtension(book.path)) {',
-    '      appendHashedFileStateToKey(key, cachePath + "/stats_v5.bin");',
-    '    }',
-    '  } else {',
-    '    key += "no-cache-path";',
-    "    key += '\\0';",
-    '  }',
+# Profile only the one frame that Home actually needs first.
+home = replace_once(
+    home,
+    block(
+        '  loadOrRender(initialBookIdx, 0);',
+        '  gCarouselCache.lastCenterIdx = initialBookIdx;',
+    ),
+    block(
+        '  const uint32_t initialFrameStartMs = millis();',
+        '  loadOrRender(initialBookIdx, 0);',
+        '  LOG_INF("HOME", "[HOMELAZY] initial center=%d disk=%d time=%lums", initialBookIdx,',
+        '          diskCacheValid ? 1 : 0, static_cast<unsigned long>(millis() - initialFrameStartMs));',
+        '  gCarouselCache.lastCenterIdx = initialBookIdx;',
+    ),
+    "profile initial carousel frame",
 )
-new_dynamic_cover_key = block(
-    '  // Reading progress/stat contents are intentionally excluded from this diagnostic static key.',
+
+# A one-frame Sticky RAM cache is not a complete bookCount-frame snapshot.
+# Therefore do not enter buildCarouselCacheFile(), whose loop renders and writes
+# all books synchronously. This is the core Run #27 change.
+home = replace_once(
+    home,
+    '  const bool hasFullFrameCache = gCarouselCache.frameCount >= targetFrameCount;',
+    '  const bool hasFullFrameCache = gCarouselCache.frameCount >= bookCount;',
+    "require every book frame before full snapshot build",
 )
-home = replace_once(home, old_dynamic_cover_key, new_dynamic_cover_key, "remove per-book dynamic carousel key state")
 
 home = replace_once(
     home,
     block(
-        '  for (const auto& book : recentBooks) {',
-        '    appendCarouselCoverStateToKey(key, book);',
+        '    } else {',
+        '      LOG_INF("HOME", "carousel: skipping SD cache build in degraded frame cache mode");',
+        '    }',
         '  }',
-        '  appendHashedFileStateToKey(key, "/.crosspoint/global_stats.bin");',
-        '  appendSyncedStatsStateToKey(key);',
-        '  keyHash = fnvHash64(key);',
+        '  return showedProgressPopup;',
+        '}',
     ),
     block(
-        '  for (const auto& book : recentBooks) {',
-        '    appendCarouselCoverStateToKey(key, book);',
+        '    } else {',
+        '      LOG_INF("HOME", "[HOMELAZY] defer full SD snapshot ram=%d books=%d current=%d",',
+        '              gCarouselCache.frameCount, bookCount, initialBookIdx);',
+        '    }',
         '  }',
-        '  // Global/stat values are diagnostic-dynamic and excluded here. Menu visibility',
-        '  // remains represented by appendCarouselMenuStateToKey().',
-        '  keyHash = fnvHash64(key);',
+        '  return showedProgressPopup;',
+        '}',
     ),
-    "remove global dynamic carousel key state",
+    "log deferred full carousel snapshot",
 )
 
-old_valid = block(
-    'bool hasValidCarouselDiskCache(const std::vector<RecentBook>& recentBooks, const GfxRenderer& renderer,',
-    '                               const bool hasOpdsServers, const bool hasReadingStats, const bool hasBookmarks,',
-    '                               const bool hasClippings) {',
-    '  const int bookCount = static_cast<int>(recentBooks.size());',
-    '  if (bookCount <= 0) return false;',
-    '',
-    '  std::string cacheKey;',
-    '  uint64_t cacheKeyHash = 0;',
-    '  buildCarouselCacheKey(recentBooks, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, cacheKey,',
-    '                        cacheKeyHash);',
-    '',
-    '  FsFile cacheFile;',
-    '  if (!Storage.openFileForRead("HOME", CAROUSEL_CACHE_PATH, cacheFile)) {',
-    '    return false;',
-    '  }',
-    '',
-    '  CarouselCacheHeader header{};',
-    '  const bool readOk = readCarouselCacheHeader(cacheFile, header);',
-    '  cacheFile.close();',
-    '  return readOk && isCarouselCacheHeaderValid(header, cacheKeyHash, bookCount, renderer);',
-    '}',
+# Existing fast path only knows how to page a missing center from a *valid* SD
+# snapshot. When no valid snapshot exists, recycle the one RAM slot and render
+# the newly-selected center lazily instead of falling back to the generic Home
+# renderer.
+old_missing_frame = block(
+    '    if (frameBuffer && slotIdx < 0 && gCarouselCache.keyHash != 0 && bookCount > 0) {',
+    '      const int evictSlot = chooseCarouselEvictionSlot(centerIdx, bookCount);',
+    '      if (evictSlot >= 0 && loadCarouselFrameFromDisk(gCarouselCache.keyHash, bookCount, centerIdx, evictSlot)) {',
+    '        slotIdx = evictSlot;',
+    '      }',
+    '    }',
 )
-new_valid = block(
-    'bool hasValidCarouselDiskCache(const std::vector<RecentBook>& recentBooks, const GfxRenderer& renderer,',
-    '                               const bool hasOpdsServers, const bool hasReadingStats, const bool hasBookmarks,',
-    '                               const bool hasClippings) {',
-    '  const int bookCount = static_cast<int>(recentBooks.size());',
-    '  if (bookCount <= 0) return false;',
-    '',
-    '  std::string cacheKey;',
-    '  uint64_t cacheKeyHash = 0;',
-    '  buildCarouselCacheKey(recentBooks, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings, cacheKey,',
-    '                        cacheKeyHash);',
-    '  LOG_INF("HOME", "[HOMERET] key=%" PRIu64 " books=%d menu=%d%d%d%d", cacheKeyHash, bookCount,',
-    '          hasOpdsServers ? 1 : 0, hasReadingStats ? 1 : 0, hasBookmarks ? 1 : 0, hasClippings ? 1 : 0);',
-    '  for (int i = 0; i < bookCount; ++i) {',
-    '    LOG_INF("HOME", "[HOMERET] order[%d]=%" PRIu64, i, fnvHash64(recentBooks[i].path));',
-    '  }',
-    '',
-    '  FsFile cacheFile;',
-    '  if (!Storage.openFileForRead("HOME", CAROUSEL_CACHE_PATH, cacheFile)) {',
-    '    LOG_INF("HOME", "[HOMERET] disk cache missing");',
-    '    return false;',
-    '  }',
-    '',
-    '  CarouselCacheHeader header{};',
-    '  const bool readOk = readCarouselCacheHeader(cacheFile, header);',
-    '  cacheFile.close();',
-    '  const bool valid = readOk && isCarouselCacheHeaderValid(header, cacheKeyHash, bookCount, renderer);',
-    '  LOG_INF("HOME", "[HOMERET] header read=%d version=%u key=%" PRIu64 " count=%u valid=%d", readOk ? 1 : 0,',
-    '          static_cast<unsigned>(header.version), header.keyHash, static_cast<unsigned>(header.frameCount),',
-    '          valid ? 1 : 0);',
-    '  return valid;',
-    '}',
+new_missing_frame = block(
+    '    if (frameBuffer && slotIdx < 0 && bookCount > 0) {',
+    '      const int evictSlot = chooseCarouselEvictionSlot(centerIdx, bookCount);',
+    '      if (evictSlot >= 0) {',
+    '        bool loadedFromDisk = false;',
+    '        if (gCarouselCache.keyHash != 0) {',
+    '          loadedFromDisk = loadCarouselFrameFromDisk(gCarouselCache.keyHash, bookCount, centerIdx, evictSlot);',
+    '        }',
+    '        if (loadedFromDisk) {',
+    '          slotIdx = evictSlot;',
+    '          LOG_INF("HOME", "[HOMELAZY] nav center=%d source=disk", centerIdx);',
+    '        } else {',
+    '          const uint32_t lazyFrameStartMs = millis();',
+    '          renderCarouselFrame(centerIdx, evictSlot);',
+    '          slotIdx = gCarouselCache.findFrameSlot(centerIdx);',
+    '          LOG_INF("HOME", "[HOMELAZY] nav center=%d source=live ready=%d time=%lums", centerIdx,',
+    '                  slotIdx >= 0 ? 1 : 0, static_cast<unsigned long>(millis() - lazyFrameStartMs));',
+    '        }',
+    '      }',
+    '    }',
 )
-home = replace_once(home, old_valid, new_valid, "static carousel key diagnostics")
-
-old_enter_cache = block(
-    '  if (isCarouselTheme &&',
-    '      hasValidCarouselDiskCache(recentBooks, renderer, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings)) {',
-    '    preRenderCarouselFrames(false);',
-    '  }',
-)
-new_enter_cache = block(
-    '  const uint32_t homeReturnCacheStartMs = millis();',
-    '  const bool carouselDiskCacheValid =',
-    '      isCarouselTheme &&',
-    '      hasValidCarouselDiskCache(recentBooks, renderer, hasOpdsServers, hasReadingStats, hasBookmarks, hasClippings);',
-    '  if (carouselDiskCacheValid) {',
-    '    preRenderCarouselFrames(false);',
-    '    LOG_INF("HOME", "[HOMERET] static cache restore ready=%d time=%lums", carouselFramesReady ? 1 : 0,',
-    '            static_cast<unsigned long>(millis() - homeReturnCacheStartMs));',
-    '  } else if (isCarouselTheme) {',
-    '    LOG_INF("HOME", "[HOMERET] static cache miss time=%lums",',
-    '            static_cast<unsigned long>(millis() - homeReturnCacheStartMs));',
-    '  }',
-)
-home = replace_once(home, old_enter_cache, new_enter_cache, "Home return cache profiler")
+home = replace_once(home, old_missing_frame, new_missing_frame, "lazy carousel navigation frame")
 
 home_path.write_text(home)
