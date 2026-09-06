@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <stdint.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -21,21 +22,22 @@
 // reset. Streaming keeps the working set to a single MCU-row band, so caching
 // succeeds and the image is decoded exactly once.
 //
-// Correctness relies on JPEGDEC delivering blocks in raster MCU order (outer
-// loop over y, inner over x: see jpeg.inl DecodeJPEG). Consecutive MCU rows map
-// to contiguous, non-overlapping destination row ranges, so once a block whose
-// top row is Y arrives, every output row < Y is final and is flushed to disk.
+// Correctness relies on decoders delivering output in raster order. Consecutive
+// source blocks/rows map to contiguous, non-overlapping destination row ranges,
+// so once the next block no longer fits in the current band, every row before it
+// is final and can be flushed to disk in one contiguous write.
 struct PixelCache {
   uint8_t* buffer;   // band buffer: (bandRows + 1) rows; last row kept zeroed
   uint8_t* zeroRow;  // points at the spare zeroed row, for gap/clip fill
   int width;
   int height;
   int bytesPerRow;
-  int originX;      // config.x - to convert screen coords to cache coords
-  int originY;      // config.y
-  int bandRows;     // rows held in the band buffer
-  int bandStart;    // image-local row index of band buffer row 0
-  int flushedRows;  // image-local rows already written to file
+  int originX;        // config.x - to convert screen coords to cache coords
+  int originY;        // config.y
+  int bandRows;       // rows held in the band buffer
+  int maxBlockRows;   // max destination rows one decoder callback/block can emit
+  int bandStart;      // image-local row index of band buffer row 0
+  int flushedRows;    // image-local rows already written to file
   HalFile file;
   std::string cachePathStr;
   bool ok;
@@ -49,6 +51,7 @@ struct PixelCache {
         originX(0),
         originY(0),
         bandRows(0),
+        maxBlockRows(1),
         bandStart(0),
         flushedRows(0),
         ok(false) {}
@@ -69,8 +72,9 @@ struct PixelCache {
     bandStart = 0;
     flushedRows = 0;
     ok = false;
+    maxBlockRows = std::max(1, maxBlockDstRows);
 
-    int wantRows = maxBlockDstRows + 2;
+    int wantRows = maxBlockRows + 2;
     if (wantRows < MIN_BAND_ROWS) wantRows = MIN_BAND_ROWS;
     if (wantRows > h) wantRows = h;
 
@@ -81,8 +85,8 @@ struct PixelCache {
     // A single decode block must fit inside the band, otherwise streaming would
     // drop rows. This only fails for pathological upscales that could not be
     // cached at all; fall back to the no-cache path.
-    if (wantRows < maxBlockDstRows) {
-      LOG_ERR("IMG", "Cache band too small (%d < %d rows) for %dx%d", wantRows, maxBlockDstRows, w, h);
+    if (wantRows < maxBlockRows) {
+      LOG_ERR("IMG", "Cache band too small (%d < %d rows) for %dx%d", wantRows, maxBlockRows, w, h);
       return false;
     }
     bandRows = wantRows;
@@ -116,23 +120,42 @@ struct PixelCache {
     return true;
   }
 
-  // Flush every output row below newTopRow (they are final in raster order) and
-  // reposition the band to start at newTopRow. Returns false if a write failed,
-  // in which case the caller must stop caching for the rest of the decode.
+  // Advance the streaming band when the next decoder block would no longer fit.
+  // Keeping rows resident until the band fills is important for PNG: its callback
+  // arrives one output row at a time, and eagerly flushing on every callback turns
+  // a 700-row image into ~700 tiny SD writes. With a 16+ row band we instead make
+  // a few dozen contiguous writes while preserving the same small RAM footprint.
   bool advanceTo(int newTopRow) {
     if (!ok) return false;
     if (newTopRow <= bandStart) return true;
     if (newTopRow > height) newTopRow = height;
 
-    for (int r = bandStart; r < newTopRow; ++r) {
-      const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
-      if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
-        LOG_ERR("IMG", "Cache write error at row %d", r);
+    const int bandEnd = bandStart + bandRows;
+    if (newTopRow < height && newTopRow + maxBlockRows <= bandEnd) {
+      return true;
+    }
+
+    const int rowsToFlush = newTopRow - bandStart;
+    const int bufferedRows = std::min(rowsToFlush, bandRows);
+    if (bufferedRows > 0) {
+      const size_t bytes = (size_t)bufferedRows * bytesPerRow;
+      if (file.write(buffer, bytes) != bytes) {
+        LOG_ERR("IMG", "Cache write error at row %d", bandStart);
         ok = false;
         return false;
       }
     }
+
+    // If the caller jumped farther than one band (normally only clipping/gaps),
+    // preserve the old behavior by zero-filling the skipped rows.
+    for (int r = bufferedRows; r < rowsToFlush; ++r) {
+      if (file.write(zeroRow, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
+        LOG_ERR("IMG", "Cache write error at row %d", bandStart + r);
+        ok = false;
+        return false;
+      }
+    }
+
     flushedRows = newTopRow;
     bandStart = newTopRow;
     memset(buffer, 0, (size_t)bandRows * bytesPerRow);  // fresh band (gaps stay black)
@@ -146,14 +169,9 @@ struct PixelCache {
       abort();
       return false;
     }
-    for (int r = flushedRows; r < height; ++r) {
-      const int idx = r - bandStart;
-      const uint8_t* rowPtr = (idx >= 0 && idx < bandRows) ? (buffer + (size_t)idx * bytesPerRow) : zeroRow;
-      if (file.write(rowPtr, (size_t)bytesPerRow) != (size_t)bytesPerRow) {
-        LOG_ERR("IMG", "Cache write error at row %d", r);
-        abort();
-        return false;
-      }
+    if (!advanceTo(height)) {
+      abort();
+      return false;
     }
     file.close();
     ok = false;  // file handed off; nothing left to clean up

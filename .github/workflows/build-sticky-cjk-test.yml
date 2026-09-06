@@ -1,0 +1,227 @@
+name: Build Sticky CJK test firmware
+
+on:
+  push:
+    branches:
+      - fix/cjk-ui-fallback-prewarm
+
+permissions:
+  contents: read
+
+jobs:
+  build-sticky:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: ${{ runner.os }}-platformio-py3.14-core6.1.19-sticky-${{ hashFiles('platformio.ini', 'platformio.local.example.ini') }}
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      - name: Inject image latency profiler
+        run: python .github/scripts/inject_sticky_image_profiler.py
+
+      - name: Inject Sticky PNG PSRAM reader fast path
+        run: python .github/scripts/inject_sticky_png_psram_fastpath.py
+
+      - name: Inject Sticky Home PNG PSRAM fast path
+        run: |
+          sed -i '/^#include <Arduino.h>$/d' lib/Epub/Epub.cpp
+          python .github/scripts/inject_sticky_home_png_psram_fastpath.py
+
+      - name: Inject Sticky Sleep PNG PSRAM fast path
+        run: python .github/scripts/inject_sticky_sleep_png_psram_fastpath.py
+
+      - name: Reuse Sticky Home carousel PNG source buffer
+        run: python .github/scripts/inject_sticky_home_carousel_pair.py
+
+      - name: Inject fast Sticky Reader-to-Home return cache
+        run: python .github/scripts/inject_sticky_home_return_cache.py
+
+      - name: Fix Lyra diagnostic theme-check ordering
+        run: |
+          sed -i 's/if (isCarouselTheme) logLyraDiagPhase(renderer, "before_first_cover_draw");/if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL) logLyraDiagPhase(renderer, "before_first_cover_draw");/' src/activities/home/HomeActivity.cpp
+          sed -i 's/if (isCarouselTheme) logLyraDiagPhase(renderer, "after_first_cover_draw");/if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::LYRA_CAROUSEL) logLyraDiagPhase(renderer, "after_first_cover_draw");/' src/activities/home/HomeActivity.cpp
+
+      - name: Defer Lyra carousel cleanup until onExit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/activities/home/HomeActivity.cpp")
+          text = path.read_text()
+          old = '''void HomeActivity::onSelectBook(const std::string& path) {
+            gCarouselCache.invalidate();
+            freeCarouselFrames();
+            if (Storage.exists(CAROUSEL_CACHE_TMP_PATH)) {
+              Storage.remove(CAROUSEL_CACHE_TMP_PATH);
+            }
+            activityManager.goToReader(path);
+          }'''
+          new = '''void HomeActivity::onSelectBook(const std::string& path) {
+            // Do not invalidate the static carousel cache here. Home::loop() runs on
+            // the main task while renderCarouselFrame() runs on the render task; an
+            // immediate free/null here can race the render task between its pointer
+            // check and the 48 KB framebuffer memcpy. onExit() already performs the
+            // same cleanup after ActivityManager acquires RenderLock.
+            LOG_INF("HOME", "[LYRADIAG] onSelectBook defer carousel cleanup until onExit");
+            if (Storage.exists(CAROUSEL_CACHE_TMP_PATH)) {
+              Storage.remove(CAROUSEL_CACHE_TMP_PATH);
+            }
+            activityManager.goToReader(path);
+          }'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"onSelectBook cleanup race patch: expected exactly one match, found {count}")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Test 2048-byte ESP32-S3 IPC task stack
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("platformio.ini")
+          text = path.read_text()
+          section_start = text.index("[env:sticky-debug]")
+          next_section = text.find("\n[", section_start + 1)
+          if next_section < 0:
+              next_section = len(text)
+          section = text[section_start:next_section]
+          old = "  CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024\n"
+          new = old + "  CONFIG_ESP_IPC_TASK_STACK_SIZE=2048\n"
+          if section.count(old) != 1:
+              raise SystemExit(f"Sticky debug IPC stack anchor count={section.count(old)}")
+          section = section.replace(old, new, 1)
+          path.write_text(text[:section_start] + section + text[next_section:])
+          print("[IPCDIAG] requested CONFIG_ESP_IPC_TASK_STACK_SIZE=2048 for sticky-debug")
+          PY
+
+      - name: Inject temporary dedicated SPI bulk-read mode
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          header_path = Path("freeink-sdk/libs/hardware/SDCardManager/include/SDCardManager.h")
+          header = header_path.read_text()
+          header = replace_once(
+              header,
+              "  SDCardManager();\n  bool begin();\n  bool ready() const;\n",
+              "  SDCardManager();\n"
+              "  bool begin();\n"
+              "  bool ready() const;\n"
+              "  // Sticky experiment: temporarily allow SdFat multi-block dedicated-SPI mode\n"
+              "  // while the display is idle, then restore shared mode before any EPD traffic.\n"
+              "  bool setDedicatedSpiForBulkRead(bool enabled) {\n"
+              "#if FREEINK_SD_SDMMC\n"
+              "    (void)enabled;\n"
+              "    return false;\n"
+              "#else\n"
+              "    return sd.setDedicatedSpi(enabled);\n"
+              "#endif\n"
+              "  }\n",
+              "SDCardManager temporary dedicated SPI hook",
+          )
+          header_path.write_text(header)
+
+          hal_header_path = Path("lib/hal/HalStorage.h")
+          hal_header = hal_header_path.read_text()
+          hal_header = replace_once(
+              hal_header,
+              "  bool begin();\n  bool ready() const;\n",
+              "  bool begin();\n"
+              "  bool ready() const;\n"
+              "  bool setDedicatedSpiForBulkRead(bool enabled);\n",
+              "HalStorage temporary dedicated SPI declaration",
+          )
+          hal_header_path.write_text(hal_header)
+
+          hal_cpp_path = Path("lib/hal/HalStorage.cpp")
+          hal_cpp = hal_cpp_path.read_text()
+          hal_cpp = replace_once(
+              hal_cpp,
+              "#define HAL_STORAGE_WRAPPED_CALL(method, ...) \\\n  HalStorage::StorageLock lock;               \\\n  return SDCard.method(__VA_ARGS__);\n\nuint64_t HalStorage::totalBytes() const { return SDCard.sdTotalBytes(); }\n",
+              "#define HAL_STORAGE_WRAPPED_CALL(method, ...) \\\n  HalStorage::StorageLock lock;               \\\n  return SDCard.method(__VA_ARGS__);\n\n"
+              "bool HalStorage::setDedicatedSpiForBulkRead(bool enabled) {\n"
+              "#if FREEINK_SD_SDMMC\n"
+              "  (void)enabled;\n"
+              "  return false;\n"
+              "#else\n"
+              "  StorageLock lock;\n"
+              "  return SDCard.setDedicatedSpiForBulkRead(enabled);\n"
+              "#endif\n"
+              "}\n\n"
+              "uint64_t HalStorage::totalBytes() const { return SDCard.sdTotalBytes(); }\n",
+              "HalStorage temporary dedicated SPI implementation",
+          )
+          hal_cpp_path.write_text(hal_cpp)
+
+          image_path = Path("lib/Epub/Epub/blocks/ImageBlock.cpp")
+          image = image_path.read_text()
+          image = replace_once(
+              image,
+              "        const uint32_t streamStartMs = millis();\n"
+              "        const bool streamed = extractContext->readItemContentsToStream(sourcePath, ramSink, 16384);\n"
+              "        const uint32_t streamMs = millis() - streamStartMs;\n"
+              "        const bool complete = streamed && ramSink.bytesWritten() == sourceSize;\n",
+              "        const bool dedicatedSpi = Storage.setDedicatedSpiForBulkRead(true);\n"
+              "        LOG_INF(\"IMG\", \"[IMGPROF] SD SPI dedicated enter=%d\", dedicatedSpi ? 1 : 0);\n"
+              "        const uint32_t streamStartMs = millis();\n"
+              "        const bool streamed = extractContext->readItemContentsToStream(sourcePath, ramSink, 16384);\n"
+              "        const uint32_t streamMs = millis() - streamStartMs;\n"
+              "        const bool sharedSpiRestored = !dedicatedSpi || Storage.setDedicatedSpiForBulkRead(false);\n"
+              "        LOG_INF(\"IMG\", \"[IMGPROF] SD SPI shared restore=%d\", sharedSpiRestored ? 1 : 0);\n"
+              "        const bool complete = streamed && ramSink.bytesWritten() == sourceSize && sharedSpiRestored;\n",
+              "ImageBlock temporary dedicated SPI window",
+          )
+          image_path.write_text(image)
+          PY
+
+      - name: Build Sticky firmware
+        run: |
+          set -euo pipefail
+          pio run -j1 -e sticky-debug | tee pio-sticky.log
+          test -f .pio/build/sticky-debug/firmware-sticky.bin
+          echo "[IPCDIAG] generated SDK config:"
+          grep -R "CONFIG_ESP_IPC_TASK_STACK_SIZE" .pio/build/sticky-debug 2>/dev/null | head -10 || true
+          sha256sum .pio/build/sticky-debug/firmware-sticky.bin | tee SHA256SUMS
+          ls -lh .pio/build/sticky-debug/firmware-sticky.bin
+          find .pio/build/sticky-debug -maxdepth 1 \( -name '*.elf' -o -name '*.map' \) -print || true
+
+      - name: Upload Sticky test firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: crossink-academic-sticky-cjk-test
+          path: |
+            .pio/build/sticky-debug/firmware-sticky.bin
+            .pio/build/sticky-debug/*.elf
+            .pio/build/sticky-debug/*.map
+            SHA256SUMS
+            pio-sticky.log
+          if-no-files-found: error
+          retention-days: 7
