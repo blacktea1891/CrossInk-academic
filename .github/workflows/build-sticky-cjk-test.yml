@@ -95,6 +95,27 @@ jobs:
           path.write_text(text.replace(old, new, 1))
           PY
 
+      - name: Test 2048-byte ESP32-S3 IPC task stack
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("platformio.ini")
+          text = path.read_text()
+          section_start = text.index("[env:sticky-debug]")
+          next_section = text.find("\n[", section_start + 1)
+          if next_section < 0:
+              next_section = len(text)
+          section = text[section_start:next_section]
+          old = "  CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024\n"
+          new = old + "  CONFIG_ESP_IPC_TASK_STACK_SIZE=2048\n"
+          if section.count(old) != 1:
+              raise SystemExit(f"Sticky debug IPC stack anchor count={section.count(old)}")
+          section = section.replace(old, new, 1)
+          path.write_text(text[:section_start] + section + text[next_section:])
+          print("[IPCDIAG] requested CONFIG_ESP_IPC_TASK_STACK_SIZE=2048 for sticky-debug")
+          PY
+
       - name: Inject temporary dedicated SPI bulk-read mode
         run: |
           python - <<'PY'
@@ -186,6 +207,8 @@ jobs:
           set -euo pipefail
           pio run -j1 -e sticky-debug | tee pio-sticky.log
           test -f .pio/build/sticky-debug/firmware-sticky.bin
+          echo "[IPCDIAG] generated SDK config:"
+          grep -R "CONFIG_ESP_IPC_TASK_STACK_SIZE" .pio/build/sticky-debug 2>/dev/null | head -10 || true
           sha256sum .pio/build/sticky-debug/firmware-sticky.bin | tee SHA256SUMS
           ls -lh .pio/build/sticky-debug/firmware-sticky.bin
           find .pio/build/sticky-debug -maxdepth 1 \( -name '*.elf' -o -name '*.map' \) -print || true
