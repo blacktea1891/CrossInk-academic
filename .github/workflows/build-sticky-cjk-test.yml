@@ -150,6 +150,7 @@ jobs:
           test -f .pio/build/sticky-debug/firmware-sticky.bin
           sha256sum .pio/build/sticky-debug/firmware-sticky.bin | tee SHA256SUMS
           ls -lh .pio/build/sticky-debug/firmware-sticky.bin
+          find .pio/build/sticky-debug -maxdepth 1 \( -name '*.elf' -o -name '*.map' \) -print || true
 
       - name: Upload Sticky test firmware
         uses: actions/upload-artifact@v7
@@ -157,6 +158,8 @@ jobs:
           name: crossink-academic-sticky-cjk-test
           path: |
             .pio/build/sticky-debug/firmware-sticky.bin
+            .pio/build/sticky-debug/*.elf
+            .pio/build/sticky-debug/*.map
             SHA256SUMS
             pio-sticky.log
           if-no-files-found: error
