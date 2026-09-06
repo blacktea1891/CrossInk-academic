@@ -51,6 +51,9 @@ jobs:
       - name: Reuse Sticky Home carousel PNG source buffer
         run: python .github/scripts/inject_sticky_home_carousel_pair.py
 
+      - name: Inject fast Sticky Reader-to-Home return cache
+        run: python .github/scripts/inject_sticky_home_return_cache.py
+
       - name: Inject temporary dedicated SPI bulk-read mode
         run: |
           python - <<'PY'
